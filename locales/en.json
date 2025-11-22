@@ -1,0 +1,12 @@
+{
+  "welcome_message": "Welcome to the Language Tutor Platform!",
+  "buttons": {
+    "login": "Log In",
+    "signup": "Sign Up",
+    "book_now": "Book Now"
+  },
+  "dashboard": {
+    "my_classes": "My Classes",
+    "find_teacher": "Find a Teacher"
+  }
+}

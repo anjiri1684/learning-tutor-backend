@@ -1,0 +1,12 @@
+{
+  "welcome_message": "¡Bienvenido a la Plataforma de Tutores de Idiomas!",
+  "buttons": {
+    "login": "Iniciar Sesión",
+    "signup": "Registrarse",
+    "book_now": "Reservar Ahora"
+  },
+  "dashboard": {
+    "my_classes": "Mis Clases",
+    "find_teacher": "Encontrar un Tutor"
+  }
+}

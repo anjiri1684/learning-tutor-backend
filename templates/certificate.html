@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Certificate of Completion</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Open+Sans:wght@400;600&display=swap');
+
+    body {
+      font-family: 'Open Sans', sans-serif;
+      background: #f9fafb;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .certificate {
+      background: #fff;
+      border: 12px solid #1a1a1a;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      width: 900px;
+      padding: 80px 60px;
+      text-align: center;
+      position: relative;
+    }
+
+    .certificate::before {
+      content: '';
+      position: absolute;
+      top: 20px; left: 20px; right: 20px; bottom: 20px;
+      border: 2px solid #d3d3d3;
+      pointer-events: none;
+    }
+
+    .title {
+      font-family: 'Playfair Display', serif;
+      font-size: 48px;
+      letter-spacing: 2px;
+      font-weight: 700;
+      color: #222;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      font-size: 20px;
+      color: #666;
+      margin-bottom: 50px;
+    }
+
+    .student-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 40px;
+      color: #111;
+      font-style: italic;
+      border-bottom: 2px solid #555;
+      display: inline-block;
+      padding: 5px 40px;
+      margin-bottom: 30px;
+    }
+
+    .description {
+      font-size: 18px;
+      color: #444;
+      margin-top: 30px;
+    }
+
+    .course {
+      font-family: 'Playfair Display', serif;
+      font-size: 26px;
+      font-weight: 600;
+      color: #111;
+      margin-top: 15px;
+      text-transform: capitalize;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 100px;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .signature {
+      text-align: center;
+    }
+
+    .signature div:first-child {
+      font-weight: 600;
+      font-size: 18px;
+    }
+
+    .signature::before {
+      content: '';
+      display: block;
+      width: 180px;
+      height: 1.5px;
+      background: #555;
+      margin: 0 auto 10px auto;
+    }
+
+    .date {
+      font-size: 16px;
+      color: #444;
+      border-top: 1.5px solid #555;
+      padding-top: 10px;
+      width: 180px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="certificate">
+    <div class="title">Certificate of Completion</div>
+    <div class="subtitle">This is to certify that</div>
+
+    <div class="student-name">{{.StudentName}}</div>
+
+    <div class="description">has successfully completed the course</div>
+    <div class="course">{{.CourseTitle}}</div>
+
+    <div class="footer">
+      <div class="date">
+        Date: {{.CompletionDate}}
+      </div>
+      <div class="signature">
+        <div>{{.TeacherName}}</div>
+        <div>Lead Instructor</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
