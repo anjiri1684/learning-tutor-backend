@@ -23,7 +23,8 @@ var (
 	tokenMutex    sync.RWMutex
 )
 
-const kcbTokenURL = "https://accounts.buni.kcbgroup.com/oauth2/token"
+const kcbTokenURL = "https://api.buni.kcbgroup.com/token?grant_type=client_credentials"
+
 
 func GetKcbAccessToken() (string, error) {
 	tokenMutex.RLock()
@@ -56,6 +57,8 @@ func GetKcbAccessToken() (string, error) {
 	resp, err := client.Do(req)
 	if err != nil { return "", err }
 	defer resp.Body.Close()
+
+	fmt.Println(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("KCB token API returned non-200 status: %s", resp.Status)
