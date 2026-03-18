@@ -10,13 +10,11 @@ type Review struct {
 	BookingID uuid.UUID `gorm:"not null;unique"` 
 	StudentID uuid.UUID `gorm:"not null"`
 	TeacherID uuid.UUID `gorm:"not null"`
-	Rating    int       `gorm:"not null"` 
+	Rating    int       `gorm:"not null;default:5;check:rating >= 1 AND rating <= 5"` 
 	Comment   string    `gorm:"type:text"`
-
 	Booking   Booking   `gorm:"foreignkey:BookingID"`
 	Student   User      `gorm:"foreignkey:StudentID"`
 	Teacher   User      `gorm:"foreignkey:TeacherID"`
-	
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

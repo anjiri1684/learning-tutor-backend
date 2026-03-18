@@ -1,4 +1,3 @@
-// file: handlers/upload_handler.go
 package handlers
 
 import (
