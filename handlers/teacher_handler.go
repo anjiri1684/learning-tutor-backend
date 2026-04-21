@@ -92,7 +92,9 @@ func CreateAvailabilitySlot(c *fiber.Ctx) error {
 
 	newSlot := models.AvailabilitySlot{
 		TeacherID:   teacherID,
-		LanguageID: func() *uuid.UUID { id := uuid.MustParse(req.LanguageID); return &id }(),
+		LanguageID: func() *uuid.UUID { 
+			
+			id := uuid.MustParse(req.LanguageID); return &id }(),
 		StartTime:   startTime,
 		EndTime:     endTime,
 		MaxStudents: maxStudents, 

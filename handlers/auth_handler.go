@@ -181,7 +181,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save reset token"})
 	}
 
-	frontendURL := "https://www.classlearning.co.ke"
+	frontendURL := "https://phylanguagecenter.com"
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)
 	
 	go notifications.SendEmail(
