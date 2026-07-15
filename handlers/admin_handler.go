@@ -82,19 +82,15 @@ func ManageApplication(c *fiber.Ctx) error {
 
 	switch req.Status {
 	case "active":
-		go notifications.SendEmail(
-			user.FullName,
-			user.Email,
-			"Your Teacher Application has been Approved!",
-			"<h1>Congratulations!</h1><p>Your application to become a teacher has been approved. You can now set your availability and start teaching.</p>",
-		)
+		go func() {
+			subject, html := notifications.TeacherApplicationApprovedTemplate(user.FullName)
+			notifications.SendEmail(user.FullName, user.Email, subject, html)
+		}()
 	case "rejected":
-		go notifications.SendEmail(
-			user.FullName,
-			user.Email,
-			"Update on Your Teacher Application",
-			"<h1>Application Update</h1><p>We regret to inform you that after careful review, your teacher application was not approved at this time.</p>",
-		)
+		go func() {
+			subject, html := notifications.TeacherApplicationRejectedTemplate(user.FullName)
+			notifications.SendEmail(user.FullName, user.Email, subject, html)
+		}()
 	}
 
 	return c.JSON(fiber.Map{"message": "Application status updated successfully"})
@@ -202,11 +198,10 @@ func AddMeetingLink(c *fiber.Ctx) error {
 	database.DB.Save(&booking)
 
 	go func() {
-		emailSubject := "Your Meeting Link is Here!"
-		emailBody := fmt.Sprintf("<h1>Class Link</h1><p>Hi there,</p><p>Here is the link for your upcoming class: <a href='%s'>Join Class</a>.</p>", req.MeetingLink)
-		
-		notifications.SendEmail(booking.Student.FullName, booking.Student.Email, emailSubject, emailBody)
-		notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, emailSubject, emailBody)
+		subject, html := notifications.MeetingLinkTemplate(booking.Student.FullName, req.MeetingLink)
+		notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
+		subject, html = notifications.MeetingLinkTemplate(booking.Teacher.FullName, req.MeetingLink)
+		notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, subject, html)
 	}()
 
 	return c.JSON(fiber.Map{"message": "Meeting link added and notifications sent successfully"})
@@ -290,14 +285,20 @@ func ProcessRefund(c *fiber.Ctx) error {
 		})
 		if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update internal records for refund"}) }
 
-		go notifications.SendEmail(payment.Booking.Student.FullName, payment.Booking.Student.Email, "Your Refund has been Processed", "<h1>Refund Processed</h1><p>Your refund request has been approved and processed by our team.</p>")
+		go func() {
+			subject, html := notifications.RefundProcessedTemplate(payment.Booking.Student.FullName)
+			notifications.SendEmail(payment.Booking.Student.FullName, payment.Booking.Student.Email, subject, html)
+		}()
 
 	} else { 
 		rejectedStatus := "rejected"
 		payment.RefundStatus = &rejectedStatus
 		database.DB.Save(&payment)
 
-		go notifications.SendEmail(payment.Booking.Student.FullName, payment.Booking.Student.Email, "Update on Your Refund Request", "<h1>Refund Request Update</h1><p>Your refund request has been reviewed and was not approved.</p>")
+		go func() {
+			subject, html := notifications.RefundRejectedTemplate(payment.Booking.Student.FullName)
+			notifications.SendEmail(payment.Booking.Student.FullName, payment.Booking.Student.Email, subject, html)
+		}()
 	}
 
 	return c.JSON(fiber.Map{"message": "Refund request processed successfully"})
@@ -452,19 +453,15 @@ func ProcessPayoutRequest(c *fiber.Ctx) error {
 	
 	teacher := payoutRequest.Teacher
 	if req.Decision == "complete" {
-		go notifications.SendEmail(
-			teacher.FullName,
-			teacher.Email,
-			"Your Payout Has Been Processed",
-			fmt.Sprintf("<h1>Payout Processed</h1><p>Hello %s,</p><p>Your payout request for the amount of $%.2f has been processed and sent by our team.</p>", teacher.FullName, payoutRequest.Amount),
-		)
+		go func() {
+			subject, html := notifications.PayoutProcessedTemplate(teacher.FullName, payoutRequest.Amount)
+			notifications.SendEmail(teacher.FullName, teacher.Email, subject, html)
+		}()
 	} else {
-		go notifications.SendEmail(
-			teacher.FullName,
-			teacher.Email,
-			"Update on Your Payout Request",
-			fmt.Sprintf("<h1>Payout Request Update</h1><p>Hello %s,</p><p>Your payout request for the amount of $%.2f was rejected. The funds have been returned to your account balance.</p><p><b>Admin Notes:</b> %s</p>", teacher.FullName, payoutRequest.Amount, req.AdminNotes),
-		)
+		go func() {
+			subject, html := notifications.PayoutRejectedTemplate(teacher.FullName, payoutRequest.Amount, req.AdminNotes)
+			notifications.SendEmail(teacher.FullName, teacher.Email, subject, html)
+		}()
 	}
 
 	return c.JSON(fiber.Map{"message": "Payout request processed."})

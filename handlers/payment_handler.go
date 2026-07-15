@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 
@@ -95,8 +96,10 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 				return err
 			}
 			go func() {
-				notifications.SendEmail(booking.Student.FullName, booking.Student.Email, "Your Booking is Confirmed!", "<h1>Booking Confirmed</h1><p>Your payment was successful and your class is confirmed. You will receive the meeting link shortly.</p>")
-				notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, "You Have a New Booking!", "<h1>New Booking</h1><p>A student has booked a session with you. Please prepare for the class.</p>")
+				sSub, sHtml := notifications.BookingConfirmedStudentTemplate(booking.Student.FullName)
+				notifications.SendEmail(booking.Student.FullName, booking.Student.Email, sSub, sHtml)
+				tSub, tHtml := notifications.BookingConfirmedTeacherTemplate(booking.Teacher.FullName)
+				notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, tSub, tHtml)
 			}()
 		}
 
@@ -109,7 +112,10 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 			if err := tx.Save(&studentBundle).Error; err != nil {
 				return err
 			}
-			go notifications.SendEmail(studentBundle.Student.FullName, studentBundle.Student.Email, "Bundle Purchase Confirmed!", "<h1>Success!</h1><p>Your class bundle purchase is complete. You can now use your class credits to book sessions.</p>")
+			go func() {
+				subject, html := notifications.BundlePurchasedTemplate(studentBundle.Student.FullName)
+				notifications.SendEmail(studentBundle.Student.FullName, studentBundle.Student.Email, subject, html)
+			}()
 		}
 
 		return nil
@@ -124,87 +130,89 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 }
 
 
-func CreatePayPalOrderHandler(c *fiber.Ctx) error {
-	paymentID := c.Params("paymentId")
-	if _, err := uuid.Parse(paymentID); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid payment ID format"})
+func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
+	type VerifyRequest struct {
+		Reference string `json:"reference" validate:"required"`
+	}
+	var req VerifyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if _, err := uuid.Parse(req.Reference); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid reference format"})
 	}
 
 	var payment models.Payment
-	if err := database.DB.Where("id = ? AND status = ? AND provider = ?", paymentID, "pending", "paypal").First(&payment).Error; err != nil {
+	if err := database.DB.Where("id = ? AND provider = ? AND status = ?", req.Reference, "paystack", "pending").First(&payment).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Pending PayPal payment not found for this ID"})
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Pending Paystack payment not found for this reference"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
 
-	order, err := payments.CreatePayPalOrder(payment.Amount, "USD") 
+	verified, err := payments.VerifyPaystackTransaction(req.Reference)
 	if err != nil {
-		log.Printf("🔥 PayPal CreateOrder API call failed: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create PayPal order"})
-	}
-	
-	payment.ProviderOrderID = &order.ID
-	if err := database.DB.Save(&payment).Error; err != nil {
-		log.Printf("🔥 Failed to save ProviderOrderID: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update payment record"})
+		log.Printf("🔥 Paystack verify API call failed: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to verify payment with Paystack"})
 	}
 
-	return c.JSON(fiber.Map{"orderID": order.ID})
-}
-
-func CapturePayPalOrderHandler(c *fiber.Ctx) error {
-	type CaptureRequest struct {
-		OrderID string `json:"orderID" validate:"required"`
-	}
-	var req CaptureRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
-
-	var payment models.Payment
-	if err := database.DB.Where("provider_order_id = ?", req.OrderID).First(&payment).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Payment record not found for this order"})
+	if verified.Data.Status != "success" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Payment not completed on Paystack"})
 	}
 
-	capturedOrder, err := payments.CapturePayPalOrder(req.OrderID)
-	if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()}) }
-	
-	if capturedOrder.Status != "COMPLETED" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Order not completed on PayPal's end"})
-	}
+	txnID := fmt.Sprintf("%d", verified.Data.TransactionID)
 
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
 		payment.Status = "succeeded"
-		payment.ProviderTxnID = &capturedOrder.ID
-		if err := tx.Save(&payment).Error; err != nil { return err }
+		payment.ProviderTxnID = &txnID
+		if err := tx.Save(&payment).Error; err != nil {
+			return err
+		}
 
 		if payment.BookingID != nil {
 			var booking models.Booking
-			if err := tx.Preload("Student").Preload("Teacher").First(&booking, "id = ?", payment.BookingID).Error; err != nil { return err }
+			if err := tx.Preload("Student").Preload("Teacher").First(&booking, "id = ?", payment.BookingID).Error; err != nil {
+				return err
+			}
 			booking.Status = "confirmed"
-			if err := tx.Save(&booking).Error; err != nil { return err }
-
+			if err := tx.Save(&booking).Error; err != nil {
+				return err
+			}
 			go func() {
-				notifications.SendEmail(booking.Student.FullName, booking.Student.Email, "Your Booking is Confirmed!", "<h1>Booking Confirmed</h1><p>Your PayPal payment was successful and your class is confirmed. You will receive the meeting link shortly.</p>")
-				notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, "You Have a New Booking!", "<h1>New Booking</h1><p>A student has booked and paid for a session with you via PayPal.</p>")
+				sSub, sHtml := notifications.BookingConfirmedStudentTemplate(booking.Student.FullName)
+				notifications.SendEmail(booking.Student.FullName, booking.Student.Email, sSub, sHtml)
+				tSub, tHtml := notifications.BookingConfirmedTeacherTemplate(booking.Teacher.FullName)
+				notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, tSub, tHtml)
 			}()
 			studentID := booking.StudentID
 			go services.CompleteReferralIfApplicable(studentID)
 		}
 		if payment.StudentBundleID != nil {
 			var studentBundle models.StudentBundle
-			if err := tx.Preload("Student").First(&studentBundle, "id = ?", payment.StudentBundleID).Error; err != nil { return err }
+			if err := tx.Preload("Student").First(&studentBundle, "id = ?", payment.StudentBundleID).Error; err != nil {
+				return err
+			}
 			studentBundle.Status = "active"
-			if err := tx.Save(&studentBundle).Error; err != nil { return err }
-			
-			go notifications.SendEmail(studentBundle.Student.FullName, studentBundle.Student.Email, "Bundle Purchase Confirmed!", "<h1>Success!</h1><p>Your class bundle purchase is complete.</p>")
+			if err := tx.Save(&studentBundle).Error; err != nil {
+				return err
+			}
+			go func() {
+				subject, html := notifications.BundlePurchasedTemplate(studentBundle.Student.FullName)
+				notifications.SendEmail(studentBundle.Student.FullName, studentBundle.Student.Email, subject, html)
+			}()
 			studentID := studentBundle.StudentID
 			go services.CompleteReferralIfApplicable(studentID)
 		}
 		return nil
 	})
 
-	if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize purchase"}) }
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize purchase"})
+	}
 
-	return c.JSON(fiber.Map{"status": "success", "message": "Payment captured and purchase confirmed"})
+	return c.JSON(fiber.Map{"status": "success", "message": "Payment verified and purchase confirmed"})
 }

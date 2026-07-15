@@ -238,7 +238,10 @@ func ProcessReschedule(c *fiber.Ctx) error {
 		})
 		if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process reschedule"}) }
 		
-		go notifications.SendEmail(booking.Student.FullName, booking.Student.Email, "Reschedule Approved", "Your request to reschedule the class has been approved by the teacher.")
+		go func() {
+			subject, html := notifications.RescheduleApprovedTemplate(booking.Student.FullName)
+			notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
+		}()
 
 	} else { 
 		booking.Status = "confirmed"
@@ -246,7 +249,10 @@ func ProcessReschedule(c *fiber.Ctx) error {
 		booking.ProposedEndTime = nil
 		database.DB.Save(&booking)
 		
-		go notifications.SendEmail(booking.Student.FullName, booking.Student.Email, "Reschedule Rejected", "Your request to reschedule the class was not approved by the teacher.")
+		go func() {
+			subject, html := notifications.RescheduleRejectedTemplate(booking.Student.FullName)
+			notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
+		}()
 	}
 
 	return c.JSON(fiber.Map{"message": "Reschedule request processed successfully"})

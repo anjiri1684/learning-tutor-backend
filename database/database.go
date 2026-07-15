@@ -56,11 +56,11 @@ func Migrate() {
 		&models.Referral{}, 
 		&models.PayoutRequest{},
 		&models.Resource{},
-) 
+	)
 	if err != nil {
-		log.Fatalf("🔥 Failed to migrate database: %v", err)
+		log.Printf("⚠️ Migration warning (non-fatal): %v", err)
 	}
-	fmt.Println("✅ Database migration successful")
+	fmt.Println("✅ Database migration completed")
 }
 
 

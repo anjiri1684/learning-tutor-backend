@@ -104,8 +104,8 @@ func main() {
 		})
 	})
 
-	log.Println("✅ Server is running on port 8080")
-	err := app.Listen(":8080")
+	log.Println("✅ Server is running on port 5050")
+	err := app.Listen(":5050")
 	if err != nil {
 		log.Fatalf("🔥 Server failed to start: %v", err)
 	}

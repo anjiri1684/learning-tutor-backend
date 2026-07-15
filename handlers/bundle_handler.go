@@ -133,10 +133,15 @@ func PurchaseBundle(c *fiber.Ctx) error {
 				}
 				if err := tx.Create(&payment).Error; err != nil { return err }
 				
-				go notifications.SendEmail(student.FullName, student.Email, "Bundle Purchase Confirmed!", "<h1>Success!</h1><p>Your class bundle has been purchased with your credit balance and is now active.</p>")
+				go func() {
+				subject, html := notifications.CreditBundlePurchasedTemplate(student.FullName)
+				notifications.SendEmail(student.FullName, student.Email, subject, html)
+			}()
 				return nil
 			})
 			if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment for bundle: " + err.Error()}) }
+
+			database.DB.Preload("Student").Preload("Bundle.Language").First(&activeBundle, "id = ?", activeBundle.ID)
 			
 			return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 				"message": "Bundle purchased successfully using your credit balance.",
@@ -150,7 +155,7 @@ func PurchaseBundle(c *fiber.Ctx) error {
 	var price = bundle.Price
 	var currency = bundle.Currency
 
-	if req.PaymentProvider == "mpesa" {
+	if req.PaymentProvider == "mpesa" || req.PaymentProvider == "paystack" {
 		if currency != "KES" {
 			kesPrice, err := services.ConvertUSDToKES(price)
 			if err != nil {
@@ -187,6 +192,8 @@ func PurchaseBundle(c *fiber.Ctx) error {
 	})
 	if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create purchase records"}) }
 
+	database.DB.Preload("Student").Preload("Bundle.Language").First(&studentBundle, "id = ?", studentBundle.ID)
+
 	if req.PaymentProvider == "mpesa" {
 		if req.MpesaPhoneNumber == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "M-Pesa phone number is required"})
@@ -210,7 +217,7 @@ func PurchaseBundle(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.PaymentProvider == "paypal" {
+	if req.PaymentProvider == "paystack" {
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"student_bundle": studentBundle,
 			"payment_id":     payment.ID,

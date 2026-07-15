@@ -90,14 +90,18 @@ func CreateBooking(c *fiber.Ctx) error {
 				if err := tx.Create(&payment).Error; err != nil { return err }
 
 				go func() {
-					if err := tx.Preload("Student").Preload("Teacher").First(&confirmedBooking).Error; err == nil {
-						notifications.SendEmail(confirmedBooking.Student.FullName, confirmedBooking.Student.Email, "Your Booking is Confirmed!", "<h1>Booking Confirmed</h1><p>Your class has been successfully booked using your credit balance.</p>")
-						notifications.SendEmail(confirmedBooking.Teacher.FullName, confirmedBooking.Teacher.Email, "You Have a New Booking!", "<h1>New Booking</h1><p>A student has booked a session with you using their credit.</p>")
-					}
-				}()
+				if err := tx.Preload("Student").Preload("Teacher").First(&confirmedBooking).Error; err == nil {
+					sSub, sHtml := notifications.CreditBookingConfirmedStudentTemplate(confirmedBooking.Student.FullName)
+					notifications.SendEmail(confirmedBooking.Student.FullName, confirmedBooking.Student.Email, sSub, sHtml)
+					tSub, tHtml := notifications.CreditBookingConfirmedTeacherTemplate(confirmedBooking.Teacher.FullName)
+					notifications.SendEmail(confirmedBooking.Teacher.FullName, confirmedBooking.Teacher.Email, tSub, tHtml)
+				}
+			}()
 				return nil
 			})
 			if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment: " + err.Error()}) }
+
+			database.DB.Preload("Student").Preload("Teacher").First(&confirmedBooking, "id = ?", confirmedBooking.ID)
 			
 			return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 				"message": "Booking confirmed successfully using your credit balance.",
@@ -111,7 +115,7 @@ func CreateBooking(c *fiber.Ctx) error {
 	var price = slot.Language.PricePerSession
 	var currency = slot.Language.Currency
 
-	if req.PaymentProvider == "mpesa" {
+	if req.PaymentProvider == "mpesa" || req.PaymentProvider == "paystack" {
 		if currency != "KES" { 
 			kesPrice, err := services.ConvertUSDToKES(price)
 			if err != nil {
@@ -152,7 +156,9 @@ func CreateBooking(c *fiber.Ctx) error {
 	})
 	
 	if err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
-	
+
+	database.DB.Preload("Student").Preload("Teacher").First(&booking, "id = ?", booking.ID)
+
 	if req.PaymentProvider == "mpesa" {
 		if req.MpesaPhoneNumber == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "M-Pesa phone number is required"})
@@ -176,7 +182,7 @@ func CreateBooking(c *fiber.Ctx) error {
 		})
 	}
 	
-	if req.PaymentProvider == "paypal" {
+	if req.PaymentProvider == "paystack" {
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"booking": booking, "payment_id": payment.ID})
 	}
 
@@ -413,7 +419,10 @@ func RequestReschedule(c *fiber.Ctx) error {
 	booking.ProposedEndTime = &newEndTime
 	database.DB.Save(&booking)
 
-	go notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, "Reschedule Request", "A student has requested to reschedule a class. Please log in to your dashboard to approve or deny the request.")
+	go func() {
+		subject, html := notifications.RescheduleRequestTemplate(booking.Teacher.FullName)
+		notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, subject, html)
+	}()
 
 	return c.JSON(fiber.Map{"message": "Reschedule request sent to the teacher."})
 }

@@ -11,8 +11,7 @@ func PaymentRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 
 	api.Post("/payments/webhook", handlers.HandlePaymentWebhook)
-	
-	paypal := api.Group("/payments/paypal", middleware.Protected())
-	paypal.Post("/create-order/:paymentId", handlers.CreatePayPalOrderHandler)
-	paypal.Post("/capture-order", handlers.CapturePayPalOrderHandler) 
+
+	paystack := api.Group("/payments/paystack", middleware.Protected())
+	paystack.Post("/verify", handlers.VerifyPaystackPaymentHandler)
 }

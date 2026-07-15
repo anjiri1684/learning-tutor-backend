@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -38,15 +37,18 @@ func SendClassReminders() {
 
 	for _, booking := range upcomingBookings {
 		log.Printf("Sending reminder for booking ID: %s", booking.ID)
-		
-		emailSubject := "Reminder: Your Class Starts in 1 Hour!"
-		emailBody := fmt.Sprintf(
-			"<h1>Class Reminder</h1><p>Hi there,</p><p>This is a friendly reminder that your class is scheduled to start in one hour at %s.</p><p><b>Meeting Link:</b> <a href='%s'>Join Class</a></p>",
+
+		subject, html := notifications.ClassReminderTemplate(
+			booking.Student.FullName,
 			booking.AvailabilitySlot.StartTime.Format(time.Kitchen),
 			*booking.MeetingLink,
 		)
-		
-		go notifications.SendEmail(booking.Student.FullName, booking.Student.Email, emailSubject, emailBody)
-		go notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, emailSubject, emailBody)
+		go notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
+		subject, html = notifications.ClassReminderTemplate(
+			booking.Teacher.FullName,
+			booking.AvailabilitySlot.StartTime.Format(time.Kitchen),
+			*booking.MeetingLink,
+		)
+		go notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, subject, html)
 	}
 }

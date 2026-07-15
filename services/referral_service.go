@@ -34,12 +34,10 @@ func CompleteReferralIfApplicable(studentID uuid.UUID) {
 			return err
 		}
 
-		go notifications.SendEmail(
-			referrer.FullName,
-			referrer.Email,
-			"You've Earned a Referral Credit!",
-			"<h1>Congratulations!</h1><p>Someone you referred has made their first purchase. A credit of $5.00 has been added to your account.</p>",
-		)
+		go func() {
+			subject, html := notifications.ReferralEarnedTemplate(referrer.FullName)
+			notifications.SendEmail(referrer.FullName, referrer.Email, subject, html)
+		}()
 
 		return nil 
 	})

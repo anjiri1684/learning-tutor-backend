@@ -45,7 +45,9 @@ type LoginRequest struct {
 func RegisterUser(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot parse JSON",
+		})
 	}
 	if err := validate.Struct(req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -105,7 +107,10 @@ func RegisterUser(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user"})
 	}
 
-	go notifications.SendEmail(newUser.FullName, newUser.Email, "Welcome!", "<h1>Welcome!</h1><p>Thank you for registering.</p>")
+	go func() {
+		subject, html := notifications.WelcomeTemplate(newUser.FullName)
+		notifications.SendEmail(newUser.FullName, newUser.Email, subject, html)
+	}()
 
 	response := UserResponse{
 		ID:        newUser.ID.String(),
@@ -184,12 +189,10 @@ func ForgotPassword(c *fiber.Ctx) error {
 	frontendURL := "https://phylanguagecenter.com"
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)
 	
-	go notifications.SendEmail(
-		user.FullName,
-		user.Email,
-		"Your Password Reset Link",
-		fmt.Sprintf("<h1>Password Reset</h1><p>Click the link below to reset your password. This link is valid for 15 minutes.</p><p><a href='%s'>Reset Password</a></p>", resetLink),
-	)
+	go func() {
+		subject, html := notifications.PasswordResetTemplate(user.FullName, resetLink)
+		notifications.SendEmail(user.FullName, user.Email, subject, html)
+	}()
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "If an account with that email exists, a password reset link has been sent."})
 }
