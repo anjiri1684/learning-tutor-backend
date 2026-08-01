@@ -92,6 +92,7 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 				return err
 			}
 			booking.Status = "confirmed"
+			services.ApplyDefaultMeetingLink(tx, &booking)
 			if err := tx.Save(&booking).Error; err != nil {
 				return err
 			}
@@ -179,6 +180,7 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 				return err
 			}
 			booking.Status = "confirmed"
+			services.ApplyDefaultMeetingLink(tx, &booking)
 			if err := tx.Save(&booking).Error; err != nil {
 				return err
 			}

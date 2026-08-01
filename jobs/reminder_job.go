@@ -7,6 +7,7 @@ import (
 	"github.com/anjiri1684/language_tutor/database"
 	"github.com/anjiri1684/language_tutor/models"
 	"github.com/anjiri1684/language_tutor/notifications"
+	"github.com/anjiri1684/language_tutor/services"
 )
 
 func SendClassReminders() {
@@ -50,5 +51,10 @@ func SendClassReminders() {
 			*booking.MeetingLink,
 		)
 		go notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, subject, html)
+
+		go services.CreateNotification(booking.StudentID, "class_reminder", "Class starting soon",
+			"Your class starts at "+booking.AvailabilitySlot.StartTime.Format(time.Kitchen)+".", "/dashboard/my-classes")
+		go services.CreateNotification(booking.TeacherID, "class_reminder", "Class starting soon",
+			"Your class starts at "+booking.AvailabilitySlot.StartTime.Format(time.Kitchen)+".", "/teacher/classes")
 	}
 }

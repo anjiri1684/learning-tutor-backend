@@ -56,6 +56,14 @@ func Migrate() {
 		&models.Referral{}, 
 		&models.PayoutRequest{},
 		&models.Resource{},
+		&models.LibraryResource{},
+		&models.LibraryResourceAccess{},
+		&models.Notification{},
+		&models.Waitlist{},
+		&models.AuditLog{},
+		&models.ResourceNote{},
+		&models.Assignment{},
+		&models.AssignmentSubmission{},
 	)
 	if err != nil {
 		log.Printf("⚠️ Migration warning (non-fatal): %v", err)

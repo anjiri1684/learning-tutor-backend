@@ -4,13 +4,13 @@ import (
 	"log"
 	"time"
 
+	config "github.com/anjiri1684/language_tutor/configs"
 	"github.com/anjiri1684/language_tutor/database"
 	"github.com/anjiri1684/language_tutor/jobs"
 	"github.com/anjiri1684/language_tutor/notifications"
 	"github.com/anjiri1684/language_tutor/payments"
 	"github.com/anjiri1684/language_tutor/routes"
 	"github.com/anjiri1684/language_tutor/services"
-	"github.com/anjiri1684/language_tutor/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -42,6 +42,7 @@ func main() {
 		ReadTimeout:         15 * time.Second,
 		WriteTimeout:        15 * time.Second,
 		IdleTimeout:         60 * time.Second,
+		BodyLimit:           25 * 1024 * 1024, 
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
@@ -59,12 +60,17 @@ func main() {
 
 	
 
+	allowedOrigins := config.Config("ALLOWED_ORIGINS")
+	if allowedOrigins == "" {
+		allowedOrigins = "https://phylanguagecenter.com,https://www.phylanguagecenter.com"
+	}
+
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*", 
+		AllowOrigins:     allowedOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Sec-WebSocket-Key, Sec-WebSocket-Version",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		ExposeHeaders:    "Content-Length, Authorization",
-		MaxAge:           86400, 
+		MaxAge:           86400,
 	}))
 
 	app.Use(recover.New()) 
@@ -95,8 +101,10 @@ func main() {
     routes.MessagingRoutes(app)   
     routes.GamificationRoutes(app)
     routes.BundleRoutes(app)
-
-	go websocket.RunHub()
+    routes.LibraryRoutes(app)
+    routes.NotificationRoutes(app)
+    routes.WaitlistRoutes(app)
+    routes.AssignmentRoutes(app)
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{

@@ -17,6 +17,9 @@ type Booking struct {
 
 	TeacherFeedback  *string   `gorm:"type:text"`
 	StudentFeedback  *string   `gorm:"type:text"`
+
+	StudentRating    *int      `gorm:"check:student_rating >= 1 AND student_rating <= 5" json:"student_rating"`
+	StudentComment   *string   `gorm:"type:text" json:"student_comment"`
 	
 	ProposedStartTime *time.Time
 	ProposedEndTime   *time.Time

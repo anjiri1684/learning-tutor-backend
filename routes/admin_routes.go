@@ -30,14 +30,24 @@ func AdminRoutes(app *fiber.App) {
 
 	users := admin.Group("/users")
 	users.Get("", handlers.GetAllUsers)
+	users.Post("", handlers.AdminCreateUser)
+	users.Post("/bulk-import", handlers.AdminBulkImportUsers)
+	users.Put("/:userId", handlers.AdminUpdateUser)
 	users.Put("/:userId/status", handlers.ToggleUserStatus)
-	users.Delete("/:userId", handlers.AdminDeleteUser) 
+	users.Delete("/:userId", handlers.AdminDeleteUser)
+	users.Post("/:userId/impersonate", handlers.AdminImpersonateUser)
+
+	teachers := admin.Group("/teachers")
+	teachers.Put("/:teacherId", handlers.AdminUpdateTeacherProfile)
+	teachers.Put("/:teacherId/meeting-link", handlers.AdminUpdateTeacherMeetingLink)
 
 
 	admin.Get("/payout-requests", handlers.ListPayoutRequests)
 	admin.Post("/payout-requests/:requestId/process", handlers.ProcessPayoutRequest)
 
 	admin.Get("/bookings", handlers.AdminGetAllBookings)
+	admin.Post("/bookings/assign", handlers.AdminAssignClass)
+	admin.Get("/audit-logs", handlers.ListAuditLogs)
 	admin.Get("/payments", handlers.AdminGetPayments)
 	
 

@@ -27,6 +27,7 @@ func TeacherRoutes(app *fiber.App) {
 	
 	availability := teacher.Group("/availability", middleware.TeacherRequired())
 	availability.Post("", handlers.CreateAvailabilitySlot)
+	availability.Post("/recurring", handlers.CreateRecurringAvailability)
 	availability.Get("/me", handlers.GetMyAvailability)
 	availability.Delete("/:slotId", handlers.DeleteAvailabilitySlot) 
 
@@ -45,6 +46,7 @@ func TeacherRoutes(app *fiber.App) {
 
 	payouts := teacher.Group("/payouts", middleware.TeacherRequired())
 	payouts.Post("/request", handlers.RequestPayout)
-	payouts.Get("/requests", handlers.GetMyPayoutRequests) 
+	payouts.Get("/requests", handlers.GetMyPayoutRequests)
+	payouts.Put("/method", handlers.UpdateMyPayoutMethod)
 
 }

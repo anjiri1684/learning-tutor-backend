@@ -5,9 +5,9 @@ import (
 	"log"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
-	config "github.com/anjiri1684/language_tutor/configs"
 	"github.com/anjiri1684/language_tutor/database"
 	"github.com/anjiri1684/language_tutor/models"
 	"github.com/anjiri1684/language_tutor/notifications"
@@ -74,10 +74,11 @@ func CreateBooking(c *fiber.Ctx) error {
 
 				confirmedBooking = models.Booking{
 					StudentID: studentID, TeacherID: slot.TeacherID, AvailabilitySlotID: slot.ID,
-					Price: slot.Language.PricePerSession, 
-					Currency: slot.Language.Currency, 
+					Price: slot.Language.PricePerSession,
+					Currency: slot.Language.Currency,
 					Status: "confirmed",
 				}
+				services.ApplyDefaultMeetingLink(tx, &confirmedBooking)
 				if err := tx.Create(&confirmedBooking).Error; err != nil { return err }
 				
 				payment := models.Payment{
@@ -254,6 +255,11 @@ func CreateReview(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	var student models.User
+	database.DB.First(&student, "id = ?", studentID)
+	go services.CreateNotification(newReview.TeacherID, "review", "New review from "+student.FullName,
+		"You received a "+strconv.Itoa(newReview.Rating)+"-star review.", "/teacher/reviews")
+
 	return c.Status(fiber.StatusCreated).JSON(newReview)
 }
 
@@ -283,29 +289,54 @@ func MarkBookingAsComplete(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot mark a class as complete before it has ended"})
 	}
 
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		booking.Status = "completed"
-		if err := tx.Save(&booking).Error; err != nil {
-			return err
-		}
-
-		commissionRate, _ := strconv.ParseFloat(config.Config("PLATFORM_COMMISSION_RATE"), 64)
-		earnings := booking.Price * (1 - commissionRate)
-
-		if err := tx.Model(&models.Teacher{}).Where("user_id = ?", booking.TeacherID).Update("current_balance", gorm.Expr("current_balance + ?", earnings)).Error; err != nil {
-			return err
-		}
-		
-		return nil
-	})
-	if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to complete booking"}) }
-
-	go services.AwardRewardsForClassCompletion(booking.StudentID)
-	go services.CheckAndGenerateCertificate(booking)
+	if err := services.CompleteBooking(booking.ID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to complete booking"})
+	}
 
 	return c.JSON(fiber.Map{"message": "Booking marked as complete and earnings have been credited."})
 }
 
+type ReportNoShowRequest struct {
+	Reason string `json:"reason" validate:"required,min=5"`
+}
+
+func ReportNoShow(c *fiber.Ctx) error {
+	token := c.Locals("user").(*jwt.Token)
+	claims := token.Claims.(jwt.MapClaims)
+	userID, _ := uuid.Parse(claims["user_id"].(string))
+	bookingID := c.Params("bookingId")
+
+	var req ReportNoShowRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	var booking models.Booking
+	if err := database.DB.Preload("Student").Preload("Teacher").First(&booking, "id = ?", bookingID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Booking not found"})
+	}
+
+	if booking.StudentID != userID && booking.TeacherID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You do not have access to this booking"})
+	}
+	if booking.Status != "completed" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No-shows can only be reported for completed classes"})
+	}
+
+	reporter := "Student"
+	if booking.TeacherID == userID {
+		reporter = "Teacher"
+	}
+
+	go services.NotifyAllAdmins("no_show_reported", "No-show reported",
+		reporter+" reported a no-show for the "+booking.Student.FullName+" / "+booking.Teacher.FullName+" class: "+req.Reason,
+		"/admin/bookings")
+
+	return c.JSON(fiber.Map{"message": "No-show reported. An admin will review it."})
+}
 
 type TeacherFeedbackRequest struct {
 	Feedback string `json:"feedback" validate:"required,min=10"`
@@ -347,6 +378,74 @@ func SubmitTeacherFeedback(c *fiber.Ctx) error {
 
 
 
+type SubmitStudentRatingRequest struct {
+	Rating  int    `json:"rating" validate:"required,min=1,max=5"`
+	Comment string `json:"comment"`
+}
+
+func SubmitStudentRating(c *fiber.Ctx) error {
+	token := c.Locals("user").(*jwt.Token)
+	claims := token.Claims.(jwt.MapClaims)
+	teacherID, _ := uuid.Parse(claims["user_id"].(string))
+	bookingID := c.Params("bookingId")
+
+	var req SubmitStudentRatingRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot parse JSON",
+		})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	var booking models.Booking
+	if err := database.DB.First(&booking, "id = ?", bookingID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Booking not found",
+		})
+	}
+
+	if booking.TeacherID != teacherID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You are not the teacher for this booking"})
+	}
+	if booking.Status != "completed" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Ratings can only be submitted for completed bookings"})
+	}
+	if booking.StudentRating != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "A rating for this booking has already been submitted"})
+	}
+
+	booking.StudentRating = &req.Rating
+	booking.StudentComment = &req.Comment
+	if err := database.DB.Save(&booking).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save rating"})
+	}
+
+	go services.CreateNotification(booking.StudentID, "rating", "Your teacher rated your class",
+		"You received a "+strconv.Itoa(req.Rating)+"-star rating.", "/dashboard/my-classes")
+
+	return c.JSON(booking)
+}
+
+func GetPendingStudentRatings(c *fiber.Ctx) error {
+	token := c.Locals("user").(*jwt.Token)
+	claims := token.Claims.(jwt.MapClaims)
+	teacherID, _ := uuid.Parse(claims["user_id"].(string))
+
+	var bookings []models.Booking
+	database.DB.
+		Preload("Student").
+		Preload("AvailabilitySlot.Language").
+		Where("teacher_id = ? AND status = ? AND student_rating IS NULL", teacherID, "completed").
+		Order("updated_at desc").
+		Find(&bookings)
+
+	return c.JSON(bookings)
+}
+
 type RefundRequest struct {
 	Reason string `json:"reason" validate:"required"`
 }
@@ -380,7 +479,9 @@ func RequestRefund(c *fiber.Ctx) error {
 	payment.RefundReason = &req.Reason
 	database.DB.Save(&payment)
 
-	
+	go services.NotifyAllAdmins("refund_requested", "New refund request",
+		"A student has requested a refund: "+req.Reason, "/admin/refunds")
+
 	return c.JSON(fiber.Map{"message": "Refund request submitted successfully. An admin will review it shortly."})
 }
 
@@ -423,10 +524,155 @@ func RequestReschedule(c *fiber.Ctx) error {
 		subject, html := notifications.RescheduleRequestTemplate(booking.Teacher.FullName)
 		notifications.SendEmail(booking.Teacher.FullName, booking.Teacher.Email, subject, html)
 	}()
+	go services.CreateNotification(booking.TeacherID, "reschedule_requested", "Reschedule request",
+		"A student has requested to reschedule a class.", "/teacher/reschedules")
 
 	return c.JSON(fiber.Map{"message": "Reschedule request sent to the teacher."})
 }
 
+
+func generateICS(events []struct {
+	UID         string
+	Start       time.Time
+	End         time.Time
+	Summary     string
+	Description string
+	Location    string
+}) string {
+	const icsTimeFormat = "20060102T150405Z"
+	now := time.Now().UTC().Format(icsTimeFormat)
+
+	var sb strings.Builder
+	sb.WriteString("BEGIN:VCALENDAR\r\n")
+	sb.WriteString("VERSION:2.0\r\n")
+	sb.WriteString("PRODID:-//Language Tutor//EN\r\n")
+	sb.WriteString("CALSCALE:GREGORIAN\r\n")
+
+	for _, event := range events {
+		sb.WriteString("BEGIN:VEVENT\r\n")
+		sb.WriteString("UID:" + event.UID + "@languagetutor\r\n")
+		sb.WriteString("DTSTAMP:" + now + "\r\n")
+		sb.WriteString("DTSTART:" + event.Start.UTC().Format(icsTimeFormat) + "\r\n")
+		sb.WriteString("DTEND:" + event.End.UTC().Format(icsTimeFormat) + "\r\n")
+		sb.WriteString("SUMMARY:" + event.Summary + "\r\n")
+		if event.Description != "" {
+			sb.WriteString("DESCRIPTION:" + event.Description + "\r\n")
+		}
+		if event.Location != "" {
+			sb.WriteString("LOCATION:" + event.Location + "\r\n")
+		}
+		sb.WriteString("END:VEVENT\r\n")
+	}
+
+	sb.WriteString("END:VCALENDAR\r\n")
+	return sb.String()
+}
+
+func GetBookingCalendar(c *fiber.Ctx) error {
+	token := c.Locals("user").(*jwt.Token)
+	claims := token.Claims.(jwt.MapClaims)
+	userID, _ := uuid.Parse(claims["user_id"].(string))
+	bookingID := c.Params("bookingId")
+
+	var booking models.Booking
+	if err := database.DB.
+		Preload("Student").
+		Preload("Teacher").
+		Preload("AvailabilitySlot.Language").
+		First(&booking, "id = ?", bookingID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Booking not found"})
+	}
+
+	if booking.StudentID != userID && booking.TeacherID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You do not have access to this booking"})
+	}
+
+	meetingLink := ""
+	if booking.MeetingLink != nil {
+		meetingLink = *booking.MeetingLink
+	}
+
+	ics := generateICS([]struct {
+		UID         string
+		Start       time.Time
+		End         time.Time
+		Summary     string
+		Description string
+		Location    string
+	}{
+		{
+			UID:         booking.ID.String(),
+			Start:       booking.AvailabilitySlot.StartTime,
+			End:         booking.AvailabilitySlot.EndTime,
+			Summary:     booking.AvailabilitySlot.Language.Name + " class with " + booking.Teacher.FullName,
+			Description: "Language Tutor class with " + booking.Teacher.FullName + " and " + booking.Student.FullName,
+			Location:    meetingLink,
+		},
+	})
+
+	c.Set("Content-Type", "text/calendar; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"class.ics\"")
+	return c.SendString(ics)
+}
+
+func GetMyCalendar(c *fiber.Ctx) error {
+	token := c.Locals("user").(*jwt.Token)
+	claims := token.Claims.(jwt.MapClaims)
+	userID, _ := uuid.Parse(claims["user_id"].(string))
+	role := claims["role"].(string)
+
+	var bookings []models.Booking
+	query := database.DB.
+		Preload("Student").
+		Preload("Teacher").
+		Preload("AvailabilitySlot.Language").
+		Where("bookings.status = ? AND availability_slots.start_time > ?", "confirmed", time.Now()).
+		Joins("JOIN availability_slots on bookings.availability_slot_id = availability_slots.id")
+
+	if role == "teacher" {
+		query = query.Where("bookings.teacher_id = ?", userID)
+	} else {
+		query = query.Where("bookings.student_id = ?", userID)
+	}
+	query.Find(&bookings)
+
+	events := make([]struct {
+		UID         string
+		Start       time.Time
+		End         time.Time
+		Summary     string
+		Description string
+		Location    string
+	}, 0, len(bookings))
+
+	for _, booking := range bookings {
+		meetingLink := ""
+		if booking.MeetingLink != nil {
+			meetingLink = *booking.MeetingLink
+		}
+		events = append(events, struct {
+			UID         string
+			Start       time.Time
+			End         time.Time
+			Summary     string
+			Description string
+			Location    string
+		}{
+			UID:         booking.ID.String(),
+			Start:       booking.AvailabilitySlot.StartTime,
+			End:         booking.AvailabilitySlot.EndTime,
+			Summary:     booking.AvailabilitySlot.Language.Name + " class with " + booking.Teacher.FullName,
+			Description: "Language Tutor class with " + booking.Teacher.FullName + " and " + booking.Student.FullName,
+			Location:    meetingLink,
+		})
+	}
+
+	ics := generateICS(events)
+
+	c.Set("Content-Type", "text/calendar; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"my-classes.ics\"")
+	return c.SendString(ics)
+}
 
 func GetMyBookings(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -454,7 +700,7 @@ func GetMyTeacherBookings(c *fiber.Ctx) error {
 	database.DB.
 		Preload("Student").
 		Preload("AvailabilitySlot.Language").
-		Where("teacher_id = ?", teacherID). 
+		Where("bookings.teacher_id = ?", teacherID).
 		Order("availability_slots.start_time desc").
 		Joins("JOIN availability_slots on bookings.availability_slot_id = availability_slots.id").
 		Find(&bookings)

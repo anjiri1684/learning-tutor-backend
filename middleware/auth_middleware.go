@@ -53,3 +53,18 @@ func TeacherRequired() fiber.Handler {
 		return c.Next()
 	}
 }
+
+func TeacherOrAdminRequired() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		token := c.Locals("user").(*jwt.Token)
+		claims := token.Claims.(jwt.MapClaims)
+		role := claims["role"].(string)
+
+		if role != "teacher" && role != "admin" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Forbidden: Teacher or admin access required",
+			})
+		}
+		return c.Next()
+	}
+}

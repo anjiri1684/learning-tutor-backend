@@ -13,5 +13,6 @@ func ProfileRoutes(app *fiber.App) {
 	profile.Get("", handlers.GetProfile)
 	profile.Put("", handlers.UpdateProfile)
 	profile.Get("/progress", handlers.GetMyProgress)
+	profile.Put("/password", handlers.ChangePassword)
 
 }
