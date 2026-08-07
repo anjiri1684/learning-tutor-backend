@@ -1233,3 +1233,77 @@ func AdminDeleteUser(c *fiber.Ctx) error {
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+type AdminSendEmailRequest struct {
+	Emails  []string `json:"emails"`
+	UserIDs []string `json:"user_ids"`
+	Roles   []string `json:"roles"`
+	Subject string   `json:"subject" validate:"required"`
+	Message string   `json:"message" validate:"required"`
+}
+
+type EmailRecipientResult struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+const maxEmailRecipients = 300
+
+func AdminSendEmail(c *fiber.Ctx) error {
+	var req AdminSendEmailRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	recipients := make(map[string]string) // email -> name
+
+	for _, raw := range req.Emails {
+		email := strings.ToLower(strings.TrimSpace(raw))
+		if email == "" || !strings.Contains(email, "@") {
+			continue
+		}
+		if _, exists := recipients[email]; !exists {
+			recipients[email] = ""
+		}
+	}
+
+	if len(req.UserIDs) > 0 {
+		var users []models.User
+		database.DB.Where("id IN ?", req.UserIDs).Find(&users)
+		for _, u := range users {
+			recipients[strings.ToLower(u.Email)] = u.FullName
+		}
+	}
+
+	if len(req.Roles) > 0 {
+		var users []models.User
+		database.DB.Where("role IN ?", req.Roles).Find(&users)
+		for _, u := range users {
+			recipients[strings.ToLower(u.Email)] = u.FullName
+		}
+	}
+
+	if len(recipients) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No valid recipients specified"})
+	}
+	if len(recipients) > maxEmailRecipients {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Too many recipients (max %d per send)", maxEmailRecipients)})
+	}
+
+	results := make([]EmailRecipientResult, 0, len(recipients))
+	for email, name := range recipients {
+		_, htmlContent := notifications.AdminCustomMessageTemplate(name, req.Subject, req.Message)
+		notifications.SendEmail(name, email, req.Subject, htmlContent)
+		results = append(results, EmailRecipientResult{Email: email, Name: name})
+	}
+
+	services.RecordAuditLog(getActorID(c), "admin.send_email", "email", nil, fmt.Sprintf("Sent %q to %d recipient(s)", req.Subject, len(recipients)))
+
+	return c.JSON(fiber.Map{
+		"message":    fmt.Sprintf("Email sent to %d recipient(s)", len(recipients)),
+		"recipients": results,
+	})
+}

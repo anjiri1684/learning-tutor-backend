@@ -49,6 +49,7 @@ func AdminRoutes(app *fiber.App) {
 	admin.Post("/bookings/assign", handlers.AdminAssignClass)
 	admin.Get("/audit-logs", handlers.ListAuditLogs)
 	admin.Get("/payments", handlers.AdminGetPayments)
+	admin.Post("/send-email", handlers.AdminSendEmail)
 	
 
 	reviews := admin.Group("/reviews")

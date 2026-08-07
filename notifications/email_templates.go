@@ -1,6 +1,9 @@
 package notifications
 
-import "fmt"
+import (
+	"fmt"
+	"html/template"
+)
 
 const emailWrapper = `<!DOCTYPE html>
 <html>
@@ -264,6 +267,26 @@ func PayoutRejectedTemplate(name string, amount float64, notes string) (subject,
 </table>
 `, name, amount, notes)
 	return "Update on Your Payout Request", fmt.Sprintf(emailWrapper, body)
+}
+
+// ── Admin Custom Message ──────────────────────────────────
+
+func AdminCustomMessageTemplate(name, subject, message string) (subjectOut, html string) {
+	escaped := template.HTMLEscapeString(message)
+	greeting := "Hi there,"
+	if name != "" {
+		greeting = fmt.Sprintf("Hi %s,", name)
+	}
+	body := fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#ffffff">%s</h2>
+<p style="margin:0 0 16px;font-size:15px;color:#a3a3a3;line-height:1.6">%s</p>
+<table width="100%%" cellpadding="0" cellspacing="0" style="margin-bottom:8px">
+<tr><td style="padding:16px 20px;background-color:#1a1a1a;border-radius:10px;border:1px solid #252525">
+  <p style="margin:0;font-size:14px;color:#d4d4d4;line-height:1.7;white-space:pre-wrap">%s</p>
+</td></tr>
+</table>
+`, template.HTMLEscapeString(subject), greeting, escaped)
+	return subject, fmt.Sprintf(emailWrapper, body)
 }
 
 // ── Referral ──────────────────────────────────────────────
