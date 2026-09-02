@@ -10,13 +10,12 @@ import (
 )
 
 type UpdateProfileRequest struct {
-	FullName         *string `json:"full_name"`
+	FullName          *string `json:"full_name"`
 	ProfilePictureURL *string `json:"profile_picture_url"`
-	TimeZone         *string `json:"time_zone"`
-	LearningGoals    *string `json:"learning_goals"`
-	ProficiencyLevel *string `json:"proficiency_level"`
+	TimeZone          *string `json:"time_zone"`
+	LearningGoals     *string `json:"learning_goals"`
+	ProficiencyLevel  *string `json:"proficiency_level"`
 }
-
 
 func GetProfile(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -63,10 +62,9 @@ func UpdateProfile(c *fiber.Ctx) error {
 	}
 
 	database.DB.Save(&user)
-	
+
 	return c.JSON(user)
 }
-
 
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password" validate:"required"`

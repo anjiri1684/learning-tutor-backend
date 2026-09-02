@@ -7,8 +7,9 @@ import (
 )
 
 func UploadRoutes(app *fiber.App) {
-	api := app.Group("/api/v1", middleware.Protected()) 
-
-	uploads := api.Group("/uploads")
+	// Scope the auth middleware to /uploads only. Using app.Group("/api/v1",
+	// Protected()) here leaked auth onto every /api/v1 route registered after
+	// this file in main.go.
+	uploads := app.Group("/api/v1/uploads", middleware.Protected())
 	uploads.Get("/signature", handlers.GenerateUploadSignature)
 }

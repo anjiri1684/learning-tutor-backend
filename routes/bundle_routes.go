@@ -9,15 +9,11 @@ import (
 func BundleRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 	api.Get("/bundles", handlers.ListActiveBundles)
-	
-	studentBundles := api.Group("/bundles", middleware.Protected())
-	studentBundles.Get("/me", handlers.GetMyBundles)
-	studentBundles.Post("/:bundleId/purchase", handlers.PurchaseBundle)
+	api.Get("/corporate-trainings", handlers.ListCorporateTrainings)
 
-
-	adminBundles := api.Group("/admin/bundles", middleware.Protected(), middleware.AdminRequired())
-	adminBundles.Get("", handlers.AdminListBundles) 
-	adminBundles.Post("", handlers.CreateBundle)
-	adminBundles.Put("/:bundleId", handlers.UpdateBundle)
-	adminBundles.Put("/:bundleId/status", handlers.ToggleBundleStatus) 
+	// Per-route Protected() rather than a Group so the auth middleware does
+	// not leak onto the public GET /bundles above.
+	studentBundles := api.Group("/bundles")
+	studentBundles.Get("/me", middleware.Protected(), handlers.GetMyBundles)
+	studentBundles.Post("/:bundleId/purchase", middleware.Protected(), handlers.PurchaseBundle)
 }

@@ -289,6 +289,38 @@ func AdminCustomMessageTemplate(name, subject, message string) (subjectOut, html
 	return subject, fmt.Sprintf(emailWrapper, body)
 }
 
+// ── Admin Alerts ──────────────────────────────────────────
+
+// AdminAlertTemplate builds a simple internal notification email for admins.
+// details is a list of "Label: value" rows shown in a card.
+func AdminAlertTemplate(heading, intro string, details []string, actionLabel, actionURL string) (subject, html string) {
+	rows := ""
+	for _, d := range details {
+		rows += fmt.Sprintf(
+			`<tr><td style="padding:6px 0;font-size:13px;color:#d4d4d4;line-height:1.6">%s</td></tr>`,
+			template.HTMLEscapeString(d),
+		)
+	}
+	action := ""
+	if actionLabel != "" && actionURL != "" {
+		action = fmt.Sprintf(
+			`<a href="%s" style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:14px;font-weight:600;letter-spacing:0.2px">%s</a>`,
+			actionURL, template.HTMLEscapeString(actionLabel),
+		)
+	}
+	body := fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#ffffff">%s</h2>
+<p style="margin:0 0 24px;font-size:15px;color:#a3a3a3;line-height:1.6">%s</p>
+<table width="100%%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+<tr><td style="padding:16px 20px;background-color:#1a1a1a;border-radius:10px;border:1px solid #252525">
+  <table width="100%%" cellpadding="0" cellspacing="0">%s</table>
+</td></tr>
+</table>
+%s
+`, template.HTMLEscapeString(heading), template.HTMLEscapeString(intro), rows, action)
+	return heading, fmt.Sprintf(emailWrapper, body)
+}
+
 // ── Referral ──────────────────────────────────────────────
 
 func ReferralEarnedTemplate(name string) (subject, html string) {

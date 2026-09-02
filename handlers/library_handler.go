@@ -333,7 +333,7 @@ func ViewLibraryResource(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve file from storage"})
 	}
-	
+
 	c.Set("Content-Type", contentType)
 	c.Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", resource.FileName))
 	c.Set("Cache-Control", "no-store")

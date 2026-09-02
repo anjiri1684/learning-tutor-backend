@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-
 func PaymentRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 

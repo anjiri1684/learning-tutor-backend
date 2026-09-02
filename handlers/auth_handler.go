@@ -64,7 +64,7 @@ func RegisterUser(c *fiber.Ctx) error {
 		if req.ReferredByCode != nil && *req.ReferredByCode != "" {
 			if err := tx.Where("referral_code = ?", *req.ReferredByCode).First(&referrer).Error; err != nil {
 				log.Printf("Invalid referral code used: %s", *req.ReferredByCode)
-				referrer = nil 
+				referrer = nil
 			}
 		}
 
@@ -97,7 +97,7 @@ func RegisterUser(c *fiber.Ctx) error {
 				return err
 			}
 		}
-		return nil 
+		return nil
 	})
 
 	if err != nil {
@@ -145,11 +145,11 @@ func LoginUser(c *fiber.Ctx) error {
 	claims := jwt.MapClaims{
 		"user_id": user.ID.String(),
 		"role":    user.Role,
-		"exp":     time.Now().Add(time.Hour * 72).Unix(), 
+		"exp":     time.Now().Add(time.Hour * 72).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	
+
 	t, err := token.SignedString([]byte(config.Config("JWT_SECRET")))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create token"})
@@ -158,14 +158,17 @@ func LoginUser(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"token": t})
 }
 
-
 func ForgotPassword(c *fiber.Ctx) error {
 	type Request struct {
 		Email string `json:"email" validate:"required,email"`
 	}
 	var req Request
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var user models.User
 	if err := database.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
@@ -177,18 +180,18 @@ func ForgotPassword(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate reset token"})
 	}
 	token := hex.EncodeToString(tokenBytes)
-	
+
 	expiration := time.Now().Add(15 * time.Minute)
 	user.ResetPasswordToken = &token
 	user.ResetPasswordTokenExpiresAt = &expiration
-	
+
 	if err := database.DB.Save(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save reset token"})
 	}
 
 	frontendURL := "https://phylanguagecenter.com"
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)
-	
+
 	go func() {
 		subject, html := notifications.PasswordResetTemplate(user.FullName, resetLink)
 		notifications.SendEmail(user.FullName, user.Email, subject, html)
@@ -203,32 +206,36 @@ func ResetPassword(c *fiber.Ctx) error {
 		NewPassword string `json:"new_password" validate:"required,min=6"`
 	}
 	var req Request
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var user models.User
 	if err := database.DB.Where("reset_password_token = ?", req.Token).First(&user).Error; err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid or expired reset token"})
 	}
-	
+
 	if user.ResetPasswordTokenExpiresAt.Before(time.Now()) {
 		user.ResetPasswordToken = nil
 		user.ResetPasswordTokenExpiresAt = nil
 		database.DB.Save(&user)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid or expired reset token"})
 	}
-	
+
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash new password"})
 	}
-	
+
 	user.Password = string(hashedPassword)
 	user.ResetPasswordToken = nil
 	user.ResetPasswordTokenExpiresAt = nil
 	if err := database.DB.Save(&user).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update password"})
 	}
-	
+
 	return c.JSON(fiber.Map{"message": "Password has been reset successfully."})
 }

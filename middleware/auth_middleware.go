@@ -23,20 +23,19 @@ func jwtError(c *fiber.Ctx, err error) error {
 		JSON(fiber.Map{"status": "error", "message": "Invalid or expired JWT", "data": nil})
 }
 
-
 func AdminRequired() fiber.Handler {
-    return func(c *fiber.Ctx) error {
-        token := c.Locals("user").(*jwt.Token)
-        claims := token.Claims.(jwt.MapClaims)
-        role := claims["role"].(string)
+	return func(c *fiber.Ctx) error {
+		token := c.Locals("user").(*jwt.Token)
+		claims := token.Claims.(jwt.MapClaims)
+		role := claims["role"].(string)
 
-        if role != "admin" {
-            return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-                "error": "Forbidden: Admin access required",
-            })
-        }
-        return c.Next()
-    }
+		if role != "admin" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Forbidden: Admin access required",
+			})
+		}
+		return c.Next()
+	}
 }
 
 func TeacherRequired() fiber.Handler {

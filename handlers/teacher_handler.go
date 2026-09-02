@@ -61,12 +61,11 @@ func ApplyToBeATeacher(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(newApplication)
 }
 
-
 type CreateAvailabilityRequest struct {
 	StartTime   string `json:"start_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
 	EndTime     string `json:"end_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
 	LanguageID  string `json:"language_id" validate:"required,uuid"`
-	MaxStudents int    `json:"max_students,omitempty"` 
+	MaxStudents int    `json:"max_students,omitempty"`
 }
 
 func CreateAvailabilitySlot(c *fiber.Ctx) error {
@@ -96,13 +95,15 @@ func CreateAvailabilitySlot(c *fiber.Ctx) error {
 	}
 
 	newSlot := models.AvailabilitySlot{
-		TeacherID:   teacherID,
-		LanguageID: func() *uuid.UUID { 
-			
-			id := uuid.MustParse(req.LanguageID); return &id }(),
+		TeacherID: teacherID,
+		LanguageID: func() *uuid.UUID {
+
+			id := uuid.MustParse(req.LanguageID)
+			return &id
+		}(),
 		StartTime:   startTime,
 		EndTime:     endTime,
-		MaxStudents: maxStudents, 
+		MaxStudents: maxStudents,
 	}
 
 	if err := database.DB.Create(&newSlot).Error; err != nil {
@@ -113,11 +114,11 @@ func CreateAvailabilitySlot(c *fiber.Ctx) error {
 }
 
 type CreateRecurringAvailabilityRequest struct {
-	StartTime    string `json:"start_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
-	EndTime      string `json:"end_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
-	LanguageID   string `json:"language_id" validate:"required,uuid"`
-	MaxStudents  int    `json:"max_students,omitempty"`
-	RepeatWeeks  int    `json:"repeat_weeks" validate:"required,gt=0,lte=52"`
+	StartTime   string `json:"start_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
+	EndTime     string `json:"end_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
+	LanguageID  string `json:"language_id" validate:"required,uuid"`
+	MaxStudents int    `json:"max_students,omitempty"`
+	RepeatWeeks int    `json:"repeat_weeks" validate:"required,gt=0,lte=52"`
 }
 
 func CreateRecurringAvailability(c *fiber.Ctx) error {
@@ -176,8 +177,6 @@ func GetMyAvailability(c *fiber.Ctx) error {
 	return c.JSON(slots)
 }
 
-
-
 func GetTeacherAvailability(c *fiber.Ctx) error {
 	teacherID := c.Params("teacherId")
 
@@ -188,8 +187,6 @@ func GetTeacherAvailability(c *fiber.Ctx) error {
 
 	return c.JSON(slots)
 }
-
-
 
 type AddLanguageRequest struct {
 	LanguageID string `json:"language_id" validate:"required,uuid"`
@@ -217,7 +214,7 @@ func AddLanguageToProfile(c *fiber.Ctx) error {
 	if err := database.DB.Where("id = ?", req.LanguageID).First(&language).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Language not found"})
 	}
-	
+
 	database.DB.Model(&teacher).Association("Languages").Append(&language)
 
 	return c.JSON(fiber.Map{"message": "Language added successfully"})
@@ -238,13 +235,11 @@ func RemoveLanguageFromProfile(c *fiber.Ctx) error {
 	if err := database.DB.Where("id = ?", langID).First(&language).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Language not found"})
 	}
-	
+
 	database.DB.Model(&teacher).Association("Languages").Delete(&language)
-	
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
-
-
 
 func ListRescheduleRequests(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -253,7 +248,7 @@ func ListRescheduleRequests(c *fiber.Ctx) error {
 
 	var requests []models.Booking
 	database.DB.Preload("Student").Where("teacher_id = ? AND status = ?", teacherID, "reschedule_requested").Find(&requests)
-	
+
 	return c.JSON(requests)
 }
 
@@ -267,8 +262,12 @@ func ProcessReschedule(c *fiber.Ctx) error {
 		Decision string `json:"decision" validate:"required,oneof=approve reject"`
 	}
 	var req ProcessRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var booking models.Booking
 	if err := database.DB.Preload("Student").First(&booking, "id = ?", bookingID).Error; err != nil {
@@ -281,21 +280,29 @@ func ProcessReschedule(c *fiber.Ctx) error {
 	if req.Decision == "approve" {
 		err := database.DB.Transaction(func(tx *gorm.DB) error {
 			var slot models.AvailabilitySlot
-			if err := tx.First(&slot, "id = ?", booking.AvailabilitySlotID).Error; err != nil { return err }
+			if err := tx.First(&slot, "id = ?", booking.AvailabilitySlotID).Error; err != nil {
+				return err
+			}
 
 			slot.StartTime = *booking.ProposedStartTime
 			slot.EndTime = *booking.ProposedEndTime
-			if err := tx.Save(&slot).Error; err != nil { return err }
+			if err := tx.Save(&slot).Error; err != nil {
+				return err
+			}
 
 			booking.Status = "confirmed"
 			booking.ProposedStartTime = nil
 			booking.ProposedEndTime = nil
-			if err := tx.Save(&booking).Error; err != nil { return err }
-			
+			if err := tx.Save(&booking).Error; err != nil {
+				return err
+			}
+
 			return nil
 		})
-		if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process reschedule"}) }
-		
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process reschedule"})
+		}
+
 		go func() {
 			subject, html := notifications.RescheduleApprovedTemplate(booking.Student.FullName)
 			notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
@@ -308,7 +315,7 @@ func ProcessReschedule(c *fiber.Ctx) error {
 		booking.ProposedStartTime = nil
 		booking.ProposedEndTime = nil
 		database.DB.Save(&booking)
-		
+
 		go func() {
 			subject, html := notifications.RescheduleRejectedTemplate(booking.Student.FullName)
 			notifications.SendEmail(booking.Student.FullName, booking.Student.Email, subject, html)
@@ -320,7 +327,7 @@ func ProcessReschedule(c *fiber.Ctx) error {
 
 func GetTeacherProfile(c *fiber.Ctx) error {
 	teacherID := c.Params("teacherId")
-	
+
 	var teacher models.Teacher
 	if err := database.DB.Preload("User").Preload("Languages").First(&teacher, "user_id = ? AND status = ?", teacherID, "active").Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Active teacher not found"})
@@ -329,12 +336,10 @@ func GetTeacherProfile(c *fiber.Ctx) error {
 	return c.JSON(teacher)
 }
 
-
 func ListActiveTeachers(c *fiber.Ctx) error {
 	var activeTeachers []models.Teacher
 	query := database.DB.Preload("User").Preload("Languages").Where("status = ?", "active")
 
-	
 	if langID := c.Query("language_id"); langID != "" {
 		query = query.Joins("JOIN teacher_languages ON teacher_languages.teacher_user_id = teachers.user_id").Where("teacher_languages.language_id = ?", langID)
 	}
@@ -348,7 +353,6 @@ func ListActiveTeachers(c *fiber.Ctx) error {
 
 	return c.JSON(activeTeachers)
 }
-
 
 func DeleteAvailabilitySlot(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -369,7 +373,6 @@ func DeleteAvailabilitySlot(c *fiber.Ctx) error {
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
-
 
 func GetTeacherEarnings(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -395,8 +398,6 @@ func GetMyPayoutRequests(c *fiber.Ctx) error {
 	return c.JSON(requests)
 }
 
-
-
 func GetMyTeacherProfile(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
 	claims := token.Claims.(jwt.MapClaims)
@@ -413,15 +414,19 @@ func UpdateMyTeacherProfile(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
 	claims := token.Claims.(jwt.MapClaims)
 	teacherID, _ := uuid.Parse(claims["user_id"].(string))
-	
+
 	type UpdateRequest struct {
 		Headline           string `json:"headline" validate:"required"`
 		Bio                string `json:"bio" validate:"required"`
 		DefaultMeetingLink string `json:"default_meeting_link" validate:"omitempty,url"`
 	}
 	var req UpdateRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var teacher models.Teacher
 	if err := database.DB.First(&teacher, "user_id = ?", teacherID).Error; err != nil {
@@ -440,8 +445,6 @@ func UpdateMyTeacherProfile(c *fiber.Ctx) error {
 	return c.JSON(teacher)
 }
 
-
-
 func GetMyReviews(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
 	claims := token.Claims.(jwt.MapClaims)
@@ -452,7 +455,6 @@ func GetMyReviews(c *fiber.Ctx) error {
 
 	return c.JSON(reviews)
 }
-
 
 func GetStudentProgressForTeacher(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -475,7 +477,7 @@ func GetStudentProgressForTeacher(c *fiber.Ctx) error {
 
 	var totalClasses int64
 	database.DB.Model(&models.Booking{}).Where("teacher_id = ? AND student_id = ? AND status = 'completed'", teacherID, studentID).Count(&totalClasses)
-	
+
 	var avgRating struct{ Avg float64 }
 	database.DB.Model(&models.Review{}).Where("teacher_id = ? AND student_id = ?", teacherID, studentID).Select("COALESCE(AVG(rating), 0) as avg").Scan(&avgRating)
 
@@ -486,8 +488,6 @@ func GetStudentProgressForTeacher(c *fiber.Ctx) error {
 		"bookings":       bookings,
 	})
 }
-
-
 
 type MonthlyEarning struct {
 	Month    string  `json:"month"`
@@ -555,7 +555,7 @@ func GetTeacherAnalytics(c *fiber.Ctx) error {
 		Group("month").
 		Order("month asc").
 		Scan(&monthlyEarnings)
-		
+
 	var totalEarnings float64
 	for _, me := range monthlyEarnings {
 		totalEarnings += me.Earnings

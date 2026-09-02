@@ -47,7 +47,7 @@ func CreateBooking(c *fiber.Ctx) error {
 	}
 	if slot.Language.ID == uuid.Nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Availability slot has invalid language"})
- 	}
+	}
 
 	if req.UseCredit {
 		var student models.User
@@ -58,52 +58,68 @@ func CreateBooking(c *fiber.Ctx) error {
 		if student.CreditBalance >= slot.Language.PricePerSession {
 			var confirmedBooking models.Booking
 			err := database.DB.Transaction(func(tx *gorm.DB) error {
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", slotID).Error; err != nil { return err }
-				
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", slotID).Error; err != nil {
+					return err
+				}
+
 				if slot.Status == "full" || slot.Status == "booked" || slot.CurrentStudents >= slot.MaxStudents {
 					return errors.New("this class is full or no longer available")
 				}
 				slot.CurrentStudents++
 				if slot.CurrentStudents >= slot.MaxStudents {
-					if slot.MaxStudents > 1 { slot.Status = "full" } else { slot.Status = "booked" }
+					if slot.MaxStudents > 1 {
+						slot.Status = "full"
+					} else {
+						slot.Status = "booked"
+					}
 				}
 
 				student.CreditBalance -= slot.Language.PricePerSession
-				if err := tx.Save(&student).Error; err != nil { return err }
-				if err := tx.Save(&slot).Error; err != nil { return err }
+				if err := tx.Save(&student).Error; err != nil {
+					return err
+				}
+				if err := tx.Save(&slot).Error; err != nil {
+					return err
+				}
 
 				confirmedBooking = models.Booking{
 					StudentID: studentID, TeacherID: slot.TeacherID, AvailabilitySlotID: slot.ID,
-					Price: slot.Language.PricePerSession,
+					Price:    slot.Language.PricePerSession,
 					Currency: slot.Language.Currency,
-					Status: "confirmed",
+					Status:   "confirmed",
 				}
 				services.ApplyDefaultMeetingLink(tx, &confirmedBooking)
-				if err := tx.Create(&confirmedBooking).Error; err != nil { return err }
-				
-				payment := models.Payment{
-					BookingID: &confirmedBooking.ID, 
-					Amount: confirmedBooking.Price, 
-					Currency: slot.Language.Currency, 
-					Provider: "credit", 
-					Status: "succeeded",
+				if err := tx.Create(&confirmedBooking).Error; err != nil {
+					return err
 				}
-				if err := tx.Create(&payment).Error; err != nil { return err }
+
+				payment := models.Payment{
+					BookingID: &confirmedBooking.ID,
+					Amount:    confirmedBooking.Price,
+					Currency:  slot.Language.Currency,
+					Provider:  "credit",
+					Status:    "succeeded",
+				}
+				if err := tx.Create(&payment).Error; err != nil {
+					return err
+				}
 
 				go func() {
-				if err := tx.Preload("Student").Preload("Teacher").First(&confirmedBooking).Error; err == nil {
-					sSub, sHtml := notifications.CreditBookingConfirmedStudentTemplate(confirmedBooking.Student.FullName)
-					notifications.SendEmail(confirmedBooking.Student.FullName, confirmedBooking.Student.Email, sSub, sHtml)
-					tSub, tHtml := notifications.CreditBookingConfirmedTeacherTemplate(confirmedBooking.Teacher.FullName)
-					notifications.SendEmail(confirmedBooking.Teacher.FullName, confirmedBooking.Teacher.Email, tSub, tHtml)
-				}
-			}()
+					if err := tx.Preload("Student").Preload("Teacher").First(&confirmedBooking).Error; err == nil {
+						sSub, sHtml := notifications.CreditBookingConfirmedStudentTemplate(confirmedBooking.Student.FullName)
+						notifications.SendEmail(confirmedBooking.Student.FullName, confirmedBooking.Student.Email, sSub, sHtml)
+						tSub, tHtml := notifications.CreditBookingConfirmedTeacherTemplate(confirmedBooking.Teacher.FullName)
+						notifications.SendEmail(confirmedBooking.Teacher.FullName, confirmedBooking.Teacher.Email, tSub, tHtml)
+					}
+				}()
 				return nil
 			})
-			if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment: " + err.Error()}) }
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment: " + err.Error()})
+			}
 
 			database.DB.Preload("Student").Preload("Teacher").First(&confirmedBooking, "id = ?", confirmedBooking.ID)
-			
+
 			return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 				"message": "Booking confirmed successfully using your credit balance.",
 				"booking": confirmedBooking,
@@ -117,13 +133,13 @@ func CreateBooking(c *fiber.Ctx) error {
 	var currency = slot.Language.Currency
 
 	if req.PaymentProvider == "mpesa" || req.PaymentProvider == "paystack" {
-		if currency != "KES" { 
+		if currency != "KES" {
 			kesPrice, err := services.ConvertUSDToKES(price)
 			if err != nil {
 				log.Printf("🔥 Currency conversion failed: %v", err)
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not perform currency conversion."})
 			}
-			price = math.Round(kesPrice) 
+			price = math.Round(kesPrice)
 			currency = "KES"
 		}
 	}
@@ -131,32 +147,46 @@ func CreateBooking(c *fiber.Ctx) error {
 	var booking models.Booking
 	var payment models.Payment
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", slotID).Error; err != nil { return err }
-		
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", slotID).Error; err != nil {
+			return err
+		}
+
 		if slot.Status == "full" || slot.Status == "booked" || slot.CurrentStudents >= slot.MaxStudents {
 			return errors.New("this class is full or no longer available")
 		}
 		slot.CurrentStudents++
 		if slot.CurrentStudents >= slot.MaxStudents {
-			if slot.MaxStudents > 1 { slot.Status = "full" } else { slot.Status = "booked" }
+			if slot.MaxStudents > 1 {
+				slot.Status = "full"
+			} else {
+				slot.Status = "booked"
+			}
 		}
-		if err := tx.Save(&slot).Error; err != nil { return err }
+		if err := tx.Save(&slot).Error; err != nil {
+			return err
+		}
 
 		booking = models.Booking{
 			StudentID: studentID, TeacherID: slot.TeacherID, AvailabilitySlotID: slot.ID,
 			Price: slot.Language.PricePerSession, Currency: slot.Language.Currency, Status: "pending_payment",
 		}
-		if err := tx.Create(&booking).Error; err != nil { return err }
+		if err := tx.Create(&booking).Error; err != nil {
+			return err
+		}
 
 		payment = models.Payment{
 			BookingID: &booking.ID, Amount: price, Currency: currency,
 			Provider: req.PaymentProvider, Status: "pending",
 		}
-		if err := tx.Create(&payment).Error; err != nil { return err }
+		if err := tx.Create(&payment).Error; err != nil {
+			return err
+		}
 		return nil
 	})
-	
-	if err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	database.DB.Preload("Student").Preload("Teacher").First(&booking, "id = ?", booking.ID)
 
@@ -164,7 +194,7 @@ func CreateBooking(c *fiber.Ctx) error {
 		if req.MpesaPhoneNumber == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "M-Pesa phone number is required"})
 		}
-		
+
 		stkResponse, err := payments.InitiateMpesaSTKPush(price, req.MpesaPhoneNumber, payment.ID.String())
 		if err != nil {
 			log.Printf("🔥 CRITICAL: InitiateMpesaSTKPush failed: %v", err)
@@ -173,7 +203,7 @@ func CreateBooking(c *fiber.Ctx) error {
 			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Payment could not be initiated, please try again."})
 		}
-		
+
 		payment.MerchantRequestID = &stkResponse.Response.MerchantRequestID
 		database.DB.Save(&payment)
 
@@ -182,14 +212,13 @@ func CreateBooking(c *fiber.Ctx) error {
 			"customer_message": stkResponse.Response.CustomerMessage,
 		})
 	}
-	
+
 	if req.PaymentProvider == "paystack" {
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"booking": booking, "payment_id": payment.ID})
 	}
 
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid payment provider specified for external payment"})
 }
-
 
 type ReviewRequest struct {
 	Rating  int    `json:"rating" validate:"required,min=1,max=5"`
@@ -243,12 +272,12 @@ func CreateReview(c *fiber.Ctx) error {
 			Avg float64
 		}
 		tx.Model(&models.Review{}).Where("teacher_id = ?", booking.TeacherID).Select("avg(rating) as avg").Scan(&result)
-		
+
 		if err := tx.Model(&models.Teacher{}).Where("user_id = ?", booking.TeacherID).Update("avg_rating", result.Avg).Error; err != nil {
 			return err
 		}
 
-		return nil 
+		return nil
 	})
 
 	if err != nil {
@@ -262,7 +291,6 @@ func CreateReview(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusCreated).JSON(newReview)
 }
-
 
 func MarkBookingAsComplete(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
@@ -376,8 +404,6 @@ func SubmitTeacherFeedback(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "Feedback submitted successfully"})
 }
 
-
-
 type SubmitStudentRatingRequest struct {
 	Rating  int    `json:"rating" validate:"required,min=1,max=5"`
 	Comment string `json:"comment"`
@@ -457,8 +483,12 @@ func RequestRefund(c *fiber.Ctx) error {
 	bookingID := c.Params("bookingId")
 
 	var req RefundRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var booking models.Booking
 	if err := database.DB.Preload("AvailabilitySlot").First(&booking, "id = ?", bookingID).Error; err != nil {
@@ -473,7 +503,7 @@ func RequestRefund(c *fiber.Ctx) error {
 
 	var payment models.Payment
 	database.DB.First(&payment, "booking_id = ?", bookingID)
-	
+
 	refundStatus := "requested"
 	payment.RefundStatus = &refundStatus
 	payment.RefundReason = &req.Reason
@@ -484,7 +514,6 @@ func RequestRefund(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "Refund request submitted successfully. An admin will review it shortly."})
 }
-
 
 type RescheduleRequest struct {
 	NewStartTime string `json:"new_start_time" validate:"required,datetime=2006-01-02T15:04:05Z07:00"`
@@ -498,8 +527,12 @@ func RequestReschedule(c *fiber.Ctx) error {
 	bookingID := c.Params("bookingId")
 
 	var req RescheduleRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var booking models.Booking
 	if err := database.DB.Preload("Teacher").First(&booking, "id = ?", bookingID).Error; err != nil {
@@ -529,7 +562,6 @@ func RequestReschedule(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "Reschedule request sent to the teacher."})
 }
-
 
 func generateICS(events []struct {
 	UID         string

@@ -6,8 +6,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-
-
 func BookingRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 
@@ -16,8 +14,8 @@ func BookingRoutes(app *fiber.App) {
 	booking.Get("/me/calendar.ics", handlers.GetMyCalendar)
 	booking.Get("/:bookingId/calendar.ics", handlers.GetBookingCalendar)
 	booking.Post("", handlers.CreateBooking)
-	booking.Post("/:bookingId/review", handlers.CreateReview) 
-	booking.Post("/:bookingId/request-refund", handlers.RequestRefund) 
+	booking.Post("/:bookingId/review", handlers.CreateReview)
+	booking.Post("/:bookingId/request-refund", handlers.RequestRefund)
 	booking.Post("/:bookingId/request-reschedule", handlers.RequestReschedule)
 	booking.Post("/:bookingId/report-no-show", handlers.ReportNoShow)
 

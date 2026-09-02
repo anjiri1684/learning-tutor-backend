@@ -21,8 +21,16 @@ type BundleRequest struct {
 	LanguageID      string  `json:"language_id" validate:"required,uuid"`
 	NumberOfClasses int     `json:"number_of_classes" validate:"required,gt=0"`
 	Price           float64 `json:"price" validate:"required,gt=0"`
+	Type            string  `json:"type" validate:"omitempty,oneof=standard corporate"`
+	Description     string  `json:"description"`
 }
 
+func normalizeBundleType(t string) string {
+	if t == "corporate" {
+		return "corporate"
+	}
+	return "standard"
+}
 
 func CreateBundle(c *fiber.Ctx) error {
 	var req BundleRequest
@@ -38,6 +46,8 @@ func CreateBundle(c *fiber.Ctx) error {
 		LanguageID:      uuid.MustParse(req.LanguageID),
 		NumberOfClasses: req.NumberOfClasses,
 		Price:           req.Price,
+		Type:            normalizeBundleType(req.Type),
+		Description:     req.Description,
 	}
 
 	if err := database.DB.Create(&bundle).Error; err != nil {
@@ -54,13 +64,19 @@ func UpdateBundle(c *fiber.Ctx) error {
 	}
 
 	var req BundleRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	bundle.Name = req.Name
 	bundle.LanguageID = uuid.MustParse(req.LanguageID)
 	bundle.NumberOfClasses = req.NumberOfClasses
 	bundle.Price = req.Price
+	bundle.Type = normalizeBundleType(req.Type)
+	bundle.Description = req.Description
 	database.DB.Save(&bundle)
 
 	return c.JSON(bundle)
@@ -70,19 +86,33 @@ func DeactivateBundle(c *fiber.Ctx) error {
 	bundleID := c.Params("bundleId")
 	result := database.DB.Model(&models.Bundle{}).Where("id = ?", bundleID).Update("is_active", false)
 
-	if result.Error != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to deactivate bundle"}) }
-	if result.RowsAffected == 0 { return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Bundle not found"}) }
-	
+	if result.Error != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to deactivate bundle"})
+	}
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Bundle not found"})
+	}
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-
 func ListActiveBundles(c *fiber.Ctx) error {
 	var bundles []models.Bundle
-	database.DB.Preload("Language").Where("is_active = ?", true).Find(&bundles)
+	database.DB.Preload("Language").
+		Where("is_active = ? AND (type = ? OR type IS NULL OR type = ?)", true, "standard", "").
+		Find(&bundles)
 	return c.JSON(bundles)
 }
 
+// ListCorporateTrainings returns active corporate training packages.
+func ListCorporateTrainings(c *fiber.Ctx) error {
+	var bundles []models.Bundle
+	database.DB.Preload("Language").
+		Where("is_active = ? AND type = ?", true, "corporate").
+		Order("price asc").
+		Find(&bundles)
+	return c.JSON(bundles)
+}
 
 type PurchaseBundleRequest struct {
 	UseCredit        bool   `json:"use_credit"`
@@ -95,12 +125,18 @@ func PurchaseBundle(c *fiber.Ctx) error {
 	claims := token.Claims.(jwt.MapClaims)
 	studentID, _ := uuid.Parse(claims["user_id"].(string))
 	bundleID, err := uuid.Parse(c.Params("bundleId"))
-	if err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid bundle ID format"}) }
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid bundle ID format"})
+	}
 
 	var req PurchaseBundleRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
-	
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
 	var bundle models.Bundle
 	if err := database.DB.First(&bundle, "id = ? AND is_active = ?", bundleID, true).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Active bundle not found"})
@@ -111,40 +147,48 @@ func PurchaseBundle(c *fiber.Ctx) error {
 		if err := database.DB.First(&student, "id = ?", studentID).Error; err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Student not found"})
 		}
-		
+
 		if student.CreditBalance >= bundle.Price {
 			var activeBundle models.StudentBundle
 			err := database.DB.Transaction(func(tx *gorm.DB) error {
 				student.CreditBalance -= bundle.Price
-				if err := tx.Save(&student).Error; err != nil { return err }
+				if err := tx.Save(&student).Error; err != nil {
+					return err
+				}
 
 				activeBundle = models.StudentBundle{
 					StudentID: studentID, BundleID: bundle.ID, PurchaseDate: time.Now(),
 					RemainingClasses: bundle.NumberOfClasses, Status: "active",
 				}
-				if err := tx.Create(&activeBundle).Error; err != nil { return err }
-				
+				if err := tx.Create(&activeBundle).Error; err != nil {
+					return err
+				}
+
 				payment := models.Payment{
-					StudentBundleID: &activeBundle.ID, 
-					Amount:          bundle.Price, 
-					Currency:        bundle.Currency, 
-					Provider:        "credit", 
+					StudentBundleID: &activeBundle.ID,
+					Amount:          bundle.Price,
+					Currency:        bundle.Currency,
+					Provider:        "credit",
 					Status:          "succeeded",
 				}
-				if err := tx.Create(&payment).Error; err != nil { return err }
-				
+				if err := tx.Create(&payment).Error; err != nil {
+					return err
+				}
+
 				go func() {
-				subject, html := notifications.CreditBundlePurchasedTemplate(student.FullName)
-				notifications.SendEmail(student.FullName, student.Email, subject, html)
-			}()
+					subject, html := notifications.CreditBundlePurchasedTemplate(student.FullName)
+					notifications.SendEmail(student.FullName, student.Email, subject, html)
+				}()
 				return nil
 			})
-			if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment for bundle: " + err.Error()}) }
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to process credit payment for bundle: " + err.Error()})
+			}
 
 			database.DB.Preload("Student").Preload("Bundle.Language").First(&activeBundle, "id = ?", activeBundle.ID)
-			
+
 			return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-				"message": "Bundle purchased successfully using your credit balance.",
+				"message":        "Bundle purchased successfully using your credit balance.",
 				"student_bundle": activeBundle,
 			})
 		} else {
@@ -162,7 +206,7 @@ func PurchaseBundle(c *fiber.Ctx) error {
 				log.Printf("🔥 Currency conversion failed: %v", err)
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not perform currency conversion."})
 			}
-			price = math.Round(kesPrice) 
+			price = math.Round(kesPrice)
 			currency = "KES"
 		}
 	}
@@ -178,19 +222,25 @@ func PurchaseBundle(c *fiber.Ctx) error {
 			RemainingClasses: bundle.NumberOfClasses,
 			Status:           "pending_payment",
 		}
-		if err := tx.Create(&studentBundle).Error; err != nil { return err }
+		if err := tx.Create(&studentBundle).Error; err != nil {
+			return err
+		}
 
 		payment = models.Payment{
 			StudentBundleID: &studentBundle.ID,
 			Amount:          price,
-			Currency:        currency, 
+			Currency:        currency,
 			Provider:        req.PaymentProvider,
 			Status:          "pending",
 		}
-		if err := tx.Create(&payment).Error; err != nil { return err }
+		if err := tx.Create(&payment).Error; err != nil {
+			return err
+		}
 		return nil
 	})
-	if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create purchase records"}) }
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create purchase records"})
+	}
 
 	database.DB.Preload("Student").Preload("Bundle.Language").First(&studentBundle, "id = ?", studentBundle.ID)
 
@@ -209,7 +259,7 @@ func PurchaseBundle(c *fiber.Ctx) error {
 		}
 
 		payment.MerchantRequestID = &stkResponse.Response.MerchantRequestID
-		database.DB.Save(&payment) 
+		database.DB.Save(&payment)
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"student_bundle":   studentBundle,
@@ -227,15 +277,13 @@ func PurchaseBundle(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid payment provider"})
 }
 
-
-
 func GetMyBundles(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
 	claims := token.Claims.(jwt.MapClaims)
 	studentID, _ := uuid.Parse(claims["user_id"].(string))
 
 	var myBundles []models.StudentBundle
-	
+
 	database.DB.
 		Preload("Bundle.Language").
 		Where("student_id = ? AND status = ?", studentID, "active").
@@ -250,11 +298,17 @@ func ToggleBundleStatus(c *fiber.Ctx) error {
 		IsActive bool `json:"is_active"`
 	}
 	var req Request
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+
 	result := database.DB.Model(&models.Bundle{}).Where("id = ?", bundleID).Update("is_active", req.IsActive)
-	if result.Error != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update bundle status"}) }
-	if result.RowsAffected == 0 { return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Bundle not found"}) }
+	if result.Error != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update bundle status"})
+	}
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Bundle not found"})
+	}
 
 	return c.JSON(fiber.Map{"message": "Bundle status updated successfully."})
 }

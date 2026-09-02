@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const ReferralRewardAmount = 5.00 
+const ReferralRewardAmount = 5.00
 
 func CompleteReferralIfApplicable(studentID uuid.UUID) {
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -39,7 +39,7 @@ func CompleteReferralIfApplicable(studentID uuid.UUID) {
 			notifications.SendEmail(referrer.FullName, referrer.Email, subject, html)
 		}()
 
-		return nil 
+		return nil
 	})
 
 	if err != nil {

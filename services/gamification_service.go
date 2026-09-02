@@ -32,7 +32,7 @@ func AwardRewardsForClassCompletion(studentID uuid.UUID) {
 		if completedClassesCount == 1 {
 			for _, badge := range student.Badges {
 				if badge.Name == badgeNameFirstClass {
-					return nil 
+					return nil
 				}
 			}
 
@@ -45,7 +45,7 @@ func AwardRewardsForClassCompletion(studentID uuid.UUID) {
 				log.Printf("Warning: Badge '%s' not found in database. Cannot award.", badgeNameFirstClass)
 			}
 		}
-		
+
 		return nil
 	})
 

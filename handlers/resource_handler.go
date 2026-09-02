@@ -36,7 +36,7 @@ func UploadResource(c *fiber.Ctx) error {
 	defer cancel()
 
 	uploadResult, err := cld.Upload.Upload(ctx, file, uploader.UploadParams{
-		Folder: "language_tutor_resources",
+		Folder:   "language_tutor_resources",
 		PublicID: fmt.Sprintf("booking_%s_%s", bookingID, file.Filename),
 	})
 	if err != nil {

@@ -79,8 +79,6 @@ func DeleteBadge(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-
-
 type LeaderboardUser struct {
 	FullName          string  `json:"full_name"`
 	XP                int     `json:"xp"`
@@ -103,18 +101,16 @@ func GetLeaderboard(c *fiber.Ctx) error {
 	return c.JSON(leaderboard)
 }
 
-
 func ListMyCertificates(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)
 	claims := token.Claims.(jwt.MapClaims)
 	studentID, _ := uuid.Parse(claims["user_id"].(string))
-	
+
 	var certificates []models.Certificate
 	database.DB.Where("student_id = ?", studentID).Find(&certificates)
 
 	return c.JSON(certificates)
 }
-
 
 func GetMyBadges(c *fiber.Ctx) error {
 	token := c.Locals("user").(*jwt.Token)

@@ -12,14 +12,14 @@ import (
 )
 
 type ExchangeRateResponse struct {
-	Result         string             `json:"result"`
+	Result          string             `json:"result"`
 	ConversionRates map[string]float64 `json:"conversion_rates"`
 }
 
 var (
-	ratesCache     map[string]float64
-	cacheMutex     sync.RWMutex
-	lastFetchTime  time.Time
+	ratesCache    map[string]float64
+	cacheMutex    sync.RWMutex
+	lastFetchTime time.Time
 )
 
 func FetchRates() (map[string]float64, error) {
@@ -35,7 +35,7 @@ func FetchRates() (map[string]float64, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("exchange rate API key not configured")
 	}
-	
+
 	url := fmt.Sprintf("https://v6.exchangerate-api.com/v6/%s/latest/USD", apiKey)
 	resp, err := http.Get(url)
 	if err != nil {

@@ -11,11 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
-
 type QuestionRequest struct {
 	QuestionText  string `json:"question_text" validate:"required"`
 	QuestionType  string `json:"question_type" validate:"required"`
-	Options       string `json:"options"` 
+	Options       string `json:"options"`
 	CorrectAnswer string `json:"correct_answer" validate:"required"`
 }
 
@@ -94,7 +93,6 @@ func DeleteQuestion(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-
 type MockTestRequest struct {
 	Title           string   `json:"title" validate:"required"`
 	Description     string   `json:"description"`
@@ -125,7 +123,7 @@ func CreateMockTest(c *fiber.Ctx) error {
 		DurationMinutes: req.DurationMinutes,
 		Questions:       questions,
 	}
-	
+
 	if err := database.DB.Create(&mockTest).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create mock test"})
 	}
@@ -175,13 +173,15 @@ func UpdateMockTest(c *fiber.Ctx) error {
 		mockTest.Title = req.Title
 		mockTest.Description = req.Description
 		mockTest.DurationMinutes = req.DurationMinutes
-		
-		if err := tx.Save(&mockTest).Error; err != nil { return err }
+
+		if err := tx.Save(&mockTest).Error; err != nil {
+			return err
+		}
 
 		if err := tx.Model(&mockTest).Association("Questions").Replace(newQuestions); err != nil {
 			return err
 		}
-		
+
 		return nil
 	})
 
@@ -194,7 +194,7 @@ func UpdateMockTest(c *fiber.Ctx) error {
 
 func DeleteMockTest(c *fiber.Ctx) error {
 	testID := c.Params("testId")
-	
+
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var mockTest models.MockTest
 		if err := tx.Preload("Questions").First(&mockTest, "id = ?", testID).Error; err != nil {
@@ -212,7 +212,7 @@ func DeleteMockTest(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete mock test"})
 	}
-	
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -248,7 +248,7 @@ func StartTestAttempt(c *fiber.Ctx) error {
 		QuestionType string    `json:"question_type"`
 		Options      string    `json:"options"`
 	}
-	
+
 	questionsForStudent := make([]QuestionForStudent, len(test.Questions))
 	for i, q := range test.Questions {
 		questionsForStudent[i] = QuestionForStudent{
@@ -260,16 +260,16 @@ func StartTestAttempt(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"attempt_id":        attempt.ID,
-		"test_title":        test.Title,
-		"duration_minutes":  test.DurationMinutes,
-		"questions":         questionsForStudent,
+		"attempt_id":       attempt.ID,
+		"test_title":       test.Title,
+		"duration_minutes": test.DurationMinutes,
+		"questions":        questionsForStudent,
 	})
 }
 
 type SubmitAnswersRequest struct {
 	Answers []struct {
-		QuestionID    string `json:"question_id" validate:"required"`
+		QuestionID     string `json:"question_id" validate:"required"`
 		SelectedAnswer string `json:"selected_answer" validate:"required"`
 	} `json:"answers" validate:"required,min=1"`
 }
@@ -281,18 +281,22 @@ func SubmitTestAttempt(c *fiber.Ctx) error {
 	attemptID := c.Params("attemptId")
 
 	var req SubmitAnswersRequest
-	if err := c.BodyParser(&req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"}) }
-	if err := validate.Struct(req); err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()}) }
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if err := validate.Struct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var attempt models.TestAttempt
 	if err := database.DB.Preload("MockTest.Questions").First(&attempt, "id = ? AND student_id = ?", attemptID, studentID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Test attempt not found"})
 	}
-	
+
 	if attempt.EndTime != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Test has already been submitted"})
 	}
-	
+
 	correctCount := 0
 	var attemptAnswers []models.AttemptAnswer
 
@@ -314,16 +318,20 @@ func SubmitTestAttempt(c *fiber.Ctx) error {
 			IsCorrect:      isCorrect,
 		})
 	}
-	
+
 	score := (float64(correctCount) / float64(len(attempt.MockTest.Questions))) * 100
 	now := time.Now()
 
 	attempt.EndTime = &now
 	attempt.Score = &score
-	
+
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&attempt).Error; err != nil { return err }
-		if err := tx.Create(&attemptAnswers).Error; err != nil { return err }
+		if err := tx.Save(&attempt).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&attemptAnswers).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 

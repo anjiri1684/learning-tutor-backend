@@ -1,17 +1,17 @@
 package routes
 
 import (
-    "github.com/anjiri1684/language_tutor/handlers"
-    "github.com/anjiri1684/language_tutor/middleware"
-    "github.com/gofiber/fiber/v2"
+	"github.com/anjiri1684/language_tutor/handlers"
+	"github.com/anjiri1684/language_tutor/middleware"
+	"github.com/gofiber/fiber/v2"
 )
 
 func MessagingRoutes(app *fiber.App) {
-    api := app.Group("/api/v1")
+	api := app.Group("/api/v1")
 
-    conversations := api.Group("/conversations", middleware.Protected())
-    conversations.Get("", handlers.GetUserConversations)
-    conversations.Post("", handlers.CreateOrGetConversation)
-    conversations.Get("/:conversationId/messages", handlers.GetConversationMessages)
-    conversations.Post("/:conversationId/messages", handlers.SendMessage)
+	conversations := api.Group("/conversations", middleware.Protected())
+	conversations.Get("", handlers.GetUserConversations)
+	conversations.Post("", handlers.CreateOrGetConversation)
+	conversations.Get("/:conversationId/messages", handlers.GetConversationMessages)
+	conversations.Post("/:conversationId/messages", handlers.SendMessage)
 }

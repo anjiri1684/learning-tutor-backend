@@ -24,7 +24,3 @@ func GamificationRoutes(app *fiber.App) {
 	userGamification.Get("/certificates/me", handlers.ListMyCertificates)
 	userGamification.Get("/badges/me", handlers.GetMyBadges)
 }
-
-
-	
-	

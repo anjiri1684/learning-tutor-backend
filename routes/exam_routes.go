@@ -17,7 +17,7 @@ func ExamRoutes(app *fiber.App) {
 	questions.Get("/:questionId", handlers.GetQuestion)
 	questions.Put("/:questionId", handlers.UpdateQuestion)
 	questions.Delete("/:questionId", handlers.DeleteQuestion)
-	
+
 	tests := exam.Group("/tests")
 	tests.Post("", handlers.CreateMockTest)
 	tests.Get("", handlers.ListMockTests)

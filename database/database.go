@@ -18,13 +18,13 @@ func ConnectDB() {
 	dsn := config.Config("DATABASE_URL")
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		PrepareStmt: false,
-		SkipDefaultTransaction: true,
+		PrepareStmt:                              false,
+		SkipDefaultTransaction:                   true,
 		DisableForeignKeyConstraintWhenMigrating: true,
-		DisableNestedTransaction: true,
-		Logger: nil,
-		NowFunc: nil,
-		Dialector: nil,
+		DisableNestedTransaction:                 true,
+		Logger:                                   nil,
+		NowFunc:                                  nil,
+		Dialector:                                nil,
 	})
 	if err != nil {
 		log.Fatalf("🔥 Failed to connect to database: %v", err)
@@ -35,25 +35,25 @@ func ConnectDB() {
 
 func Migrate() {
 	err := DB.AutoMigrate(
-		&models.User{}, 
-		&models.Teacher{}, 
+		&models.User{},
+		&models.Teacher{},
 		&models.AvailabilitySlot{},
 		&models.Language{},
 		&models.TeacherLanguage{},
-		&models.Booking{}, 
+		&models.Booking{},
 		&models.Payment{},
-		&models.Question{}, 
-		&models.MockTest{},  
-		&models.TestAttempt{},   
-		&models.AttemptAnswer{}, 
-		&models.Badge{}, 
-		&models.Review{}, 
-		&models.Certificate{}, 
-		&models.Conversation{}, 
+		&models.Question{},
+		&models.MockTest{},
+		&models.TestAttempt{},
+		&models.AttemptAnswer{},
+		&models.Badge{},
+		&models.Review{},
+		&models.Certificate{},
+		&models.Conversation{},
 		&models.Message{},
-		&models.Bundle{},        
+		&models.Bundle{},
 		&models.StudentBundle{},
-		&models.Referral{}, 
+		&models.Referral{},
 		&models.PayoutRequest{},
 		&models.Resource{},
 		&models.LibraryResource{},
@@ -64,13 +64,14 @@ func Migrate() {
 		&models.ResourceNote{},
 		&models.Assignment{},
 		&models.AssignmentSubmission{},
+		&models.CorporateEnquiry{},
+		&models.ContactRequest{},
 	)
 	if err != nil {
 		log.Printf("⚠️ Migration warning (non-fatal): %v", err)
 	}
 	fmt.Println("✅ Database migration completed")
 }
-
 
 func SeedAdmin() {
 	adminEmail := config.Config("ADMIN_EMAIL")

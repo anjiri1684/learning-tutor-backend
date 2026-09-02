@@ -5,7 +5,6 @@ import (
 	"gorm.io/gorm"
 )
 
-
 func ApplyDefaultMeetingLink(tx *gorm.DB, booking *models.Booking) {
 	if booking.MeetingLink != nil && *booking.MeetingLink != "" {
 		return

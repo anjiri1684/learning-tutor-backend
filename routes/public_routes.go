@@ -9,6 +9,8 @@ func PublicRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 
 	api.Get("/locales/:lang", handlers.GetLocale)
-	api.Get("/currency/rate", handlers.GetConversionRate) 
+	api.Get("/currency/rate", handlers.GetConversionRate)
+	api.Post("/corporate-enquiries", handlers.CreateCorporateEnquiry)
+	api.Post("/contact-requests", handlers.CreateContactRequest)
 
 }

@@ -29,14 +29,14 @@ func CheckAndGenerateCertificate(booking models.Booking) {
 		Count(&completedCount)
 
 	if completedCount < certificateCompletionCount {
-		return 
+		return
 	}
 
 	courseTitle := fmt.Sprintf("%s with %s - %d Sessions", booking.AvailabilitySlot.Language.Name, booking.Teacher.FullName, certificateCompletionCount)
 
 	var existingCert models.Certificate
 	if err := database.DB.Where("student_id = ? AND course_title = ?", booking.StudentID, courseTitle).First(&existingCert).Error; err == nil {
-		return 
+		return
 	}
 
 	htmlData, err := generateCertificateHTML(booking.Student.FullName, booking.Teacher.FullName, courseTitle)
@@ -132,13 +132,13 @@ func uploadToCloudinary(fileBytes []byte, studentID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	uploadParams := uploader.UploadParams{
-		PublicID: fmt.Sprintf("certificates/%s_%s", studentID, uuid.New().String()),
-		Folder:   "language_tutor_certificates",
+		PublicID:     fmt.Sprintf("certificates/%s_%s", studentID, uuid.New().String()),
+		Folder:       "language_tutor_certificates",
 		ResourceType: "raw",
 	}
 

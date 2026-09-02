@@ -27,7 +27,7 @@ type KcbWebhookPayload struct {
 				Item []struct {
 					Name  string      `json:"Name"`
 					Value interface{} `json:"Value"`
-				} `json:"Item"` 
+				} `json:"Item"`
 			} `json:"CallbackMetadata"`
 			Reference string `json:"Reference"`
 		} `json:"stkCallback"`
@@ -45,9 +45,9 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 	var paymentRefID string
 	parts := strings.Split(stk.Reference, "-")
 	if len(parts) == 2 {
-		paymentRefID = parts[1] 
+		paymentRefID = parts[1]
 	} else {
-		paymentRefID = stk.Reference 
+		paymentRefID = stk.Reference
 	}
 
 	log.Printf("Received webhook for MerchantRequestID: %s, PaymentRefID: %s, ResultCode: %d",
@@ -81,7 +81,7 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 
 		payment.Status = "succeeded"
 		payment.ProviderTxnID = &mpesaReceipt
-		payment.MerchantRequestID = &stk.MerchantRequestID 
+		payment.MerchantRequestID = &stk.MerchantRequestID
 		if err := tx.Save(&payment).Error; err != nil {
 			return err
 		}
@@ -129,7 +129,6 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Webhook processed successfully"})
 }
-
 
 func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 	type VerifyRequest struct {
