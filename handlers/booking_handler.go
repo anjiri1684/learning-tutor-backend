@@ -217,6 +217,12 @@ func CreateBooking(c *fiber.Ctx) error {
 		authURL, err := payments.InitializePaystackTransaction(booking.Student.Email, payment.Amount, payment.Currency, payment.ID.String(), payments.PaystackCallbackURL(c.Get("Origin")))
 		if err != nil {
 			log.Printf("🔥 Paystack initialize failed for payment %s: %v", payment.ID, err)
+			// Checkout never started, so give the seat back and close out the
+			// pending records; otherwise a 1:1 slot stays "booked" forever and
+			// the retry is rejected as full.
+			if relErr := releasePendingBooking(booking.ID, payment.ID); relErr != nil {
+				log.Printf("🔥 CRITICAL: could not release slot after Paystack init failure (booking %s): %v", booking.ID, relErr)
+			}
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Could not start Paystack checkout, please try again."})
 		}
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -747,4 +753,45 @@ func GetMyTeacherBookings(c *fiber.Ctx) error {
 		Find(&bookings)
 
 	return c.JSON(bookings)
+}
+
+// releasePendingBooking undoes a booking whose external checkout could not be
+// started: payment -> failed, booking -> cancelled, and the slot seat is freed.
+// Guarded on the pending statuses so it never touches a paid booking.
+func releasePendingBooking(bookingID, paymentID uuid.UUID) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.Payment{}).
+			Where("id = ? AND status = ?", paymentID, "pending").
+			Update("status", "failed")
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+
+		var booking models.Booking
+		if err := tx.First(&booking, "id = ?", bookingID).Error; err != nil {
+			return err
+		}
+		if booking.Status != "pending_payment" {
+			return nil
+		}
+		booking.Status = "cancelled"
+		if err := tx.Save(&booking).Error; err != nil {
+			return err
+		}
+
+		var slot models.AvailabilitySlot
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", booking.AvailabilitySlotID).Error; err != nil {
+			return err
+		}
+		if slot.CurrentStudents > 0 {
+			slot.CurrentStudents--
+		}
+		if slot.CurrentStudents < slot.MaxStudents {
+			slot.Status = "available"
+		}
+		return tx.Save(&slot).Error
+	})
 }

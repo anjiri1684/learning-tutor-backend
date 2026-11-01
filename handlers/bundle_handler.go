@@ -271,6 +271,17 @@ func PurchaseBundle(c *fiber.Ctx) error {
 		authURL, err := payments.InitializePaystackTransaction(studentBundle.Student.Email, payment.Amount, payment.Currency, payment.ID.String(), payments.PaystackCallbackURL(c.Get("Origin")))
 		if err != nil {
 			log.Printf("🔥 Paystack initialize failed for payment %s: %v", payment.ID, err)
+			// Checkout never started: close out the pending records so they
+			// don't pile up as orphaned pending_payment rows.
+			if relErr := database.DB.Transaction(func(tx *gorm.DB) error {
+				res := tx.Model(&models.Payment{}).Where("id = ? AND status = ?", payment.ID, "pending").Update("status", "failed")
+				if res.Error != nil || res.RowsAffected == 0 {
+					return res.Error
+				}
+				return tx.Model(&models.StudentBundle{}).Where("id = ? AND status = ?", studentBundle.ID, "pending_payment").Update("status", "cancelled").Error
+			}); relErr != nil {
+				log.Printf("🔥 could not close out bundle purchase after Paystack init failure (payment %s): %v", payment.ID, relErr)
+			}
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Could not start Paystack checkout, please try again."})
 		}
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{

@@ -54,7 +54,9 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 		stk.MerchantRequestID, paymentRefID, stk.ResultCode)
 
 	var payment models.Payment
-	if err := database.DB.Where("id = ?", paymentRefID).First(&payment).Error; err != nil {
+	// Only M-Pesa payments belong to this webhook; never let it touch Paystack
+	// records (e.g. flip an amount_mismatch payment to succeeded).
+	if err := database.DB.Where("id = ? AND provider = ?", paymentRefID, "mpesa").First(&payment).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Payment record not found"})
 	}
 
@@ -184,7 +186,9 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 	if verified.Data.Amount != expected || !strings.EqualFold(verified.Data.Currency, payment.Currency) {
 		log.Printf("🚨 Paystack amount mismatch for payment %s: expected %d %s, got %d %s (txn %d)",
 			payment.ID, expected, payment.Currency, verified.Data.Amount, verified.Data.Currency, verified.Data.TransactionID)
-		database.DB.Model(&models.Payment{}).Where("id = ? AND status = ?", payment.ID, "pending").Update("status", "amount_mismatch")
+		if err := database.DB.Model(&models.Payment{}).Where("id = ? AND status = ?", payment.ID, "pending").Update("status", "amount_mismatch").Error; err != nil {
+			log.Printf("🔥 could not mark payment %s as amount_mismatch: %v", payment.ID, err)
+		}
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Paid amount does not match the order amount. Please contact support."})
 	}
 
