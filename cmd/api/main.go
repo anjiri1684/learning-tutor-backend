@@ -29,6 +29,7 @@ func main() {
 	c := cron.New()
 	c.AddFunc("*/5 * * * *", jobs.CheckForUnattendedClasses)
 	c.AddFunc("*/5 * * * *", jobs.SendClassReminders) 
+	c.AddFunc("*/15 * * * *", jobs.ReconcileStalePaystackPayments)
 	go c.Start()
 	log.Println("✅ Cron job for attendance scheduled successfully.")
 

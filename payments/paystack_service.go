@@ -2,6 +2,9 @@ package payments
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,13 +24,14 @@ type PaystackVerifyResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
 	Data    struct {
-		Status        string `json:"status"`
-		Reference     string `json:"reference"`
-		Amount        int64  `json:"amount"`
-		Currency      string `json:"currency"`
-		Channel       string `json:"channel"`
-		TransactionID int64  `json:"id"`
-		Customer      struct {
+		Status          string `json:"status"`
+		Reference       string `json:"reference"`
+		Amount          int64  `json:"amount"`
+		RequestedAmount int64  `json:"requested_amount"`
+		Currency        string `json:"currency"`
+		Channel         string `json:"channel"`
+		TransactionID   int64  `json:"id"`
+		Customer        struct {
 			Email string `json:"email"`
 		} `json:"customer"`
 	} `json:"data"`
@@ -144,4 +148,17 @@ func VerifyPaystackTransaction(reference string) (*PaystackVerifyResponse, error
 	}
 
 	return &result, nil
+}
+
+// ValidPaystackSignature checks the x-paystack-signature header: an
+// HMAC-SHA512 of the raw request body keyed with the secret key.
+func ValidPaystackSignature(body []byte, signature string) bool {
+	secret := config.Config("PAYSTACK_SECRET_KEY")
+	if secret == "" || signature == "" {
+		return false
+	}
+	mac := hmac.New(sha512.New, []byte(secret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(strings.ToLower(signature)))
 }
