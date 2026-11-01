@@ -29,6 +29,12 @@ func main() {
 	c := cron.New()
 	c.AddFunc("*/5 * * * *", jobs.CheckForUnattendedClasses)
 	c.AddFunc("*/5 * * * *", jobs.SendClassReminders) 
+	// Skip a run if the previous one is still going, and recover from panics
+	// so a bad reconcile run can't take the API down.
+	c.AddJob("*/15 * * * *", cron.NewChain(
+		cron.Recover(cron.DefaultLogger),
+		cron.SkipIfStillRunning(cron.DefaultLogger),
+	).Then(cron.FuncJob(jobs.ReconcileStalePaystackPayments)))
 	go c.Start()
 	log.Println("✅ Cron job for attendance scheduled successfully.")
 

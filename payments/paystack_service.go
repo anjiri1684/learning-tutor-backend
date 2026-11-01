@@ -2,7 +2,11 @@ package payments
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -17,17 +21,23 @@ const paystackBaseURL = "https://api.paystack.co"
 
 var paystackClient = &http.Client{Timeout: 20 * time.Second}
 
+// ErrPaystackTxnNotFound is returned when Paystack explicitly reports it has no
+// transaction with the given reference (response code "transaction_not_found").
+var ErrPaystackTxnNotFound = errors.New("paystack: transaction not found")
+
 type PaystackVerifyResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
+	Code    string `json:"code"`
 	Data    struct {
-		Status        string `json:"status"`
-		Reference     string `json:"reference"`
-		Amount        int64  `json:"amount"`
-		Currency      string `json:"currency"`
-		Channel       string `json:"channel"`
-		TransactionID int64  `json:"id"`
-		Customer      struct {
+		Status          string `json:"status"`
+		Reference       string `json:"reference"`
+		Amount          int64  `json:"amount"`
+		RequestedAmount int64  `json:"requested_amount"`
+		Currency        string `json:"currency"`
+		Channel         string `json:"channel"`
+		TransactionID   int64  `json:"id"`
+		Customer        struct {
 			Email string `json:"email"`
 		} `json:"customer"`
 	} `json:"data"`
@@ -140,8 +150,24 @@ func VerifyPaystackTransaction(reference string) (*PaystackVerifyResponse, error
 	}
 
 	if !result.Status {
+		if result.Code == "transaction_not_found" {
+			return nil, fmt.Errorf("%w: %s", ErrPaystackTxnNotFound, result.Message)
+		}
 		return nil, fmt.Errorf("paystack: %s", result.Message)
 	}
 
 	return &result, nil
+}
+
+// ValidPaystackSignature checks the x-paystack-signature header: an
+// HMAC-SHA512 of the raw request body keyed with the secret key.
+func ValidPaystackSignature(body []byte, signature string) bool {
+	secret := config.Config("PAYSTACK_SECRET_KEY")
+	if secret == "" || signature == "" {
+		return false
+	}
+	mac := hmac.New(sha512.New, []byte(secret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(strings.ToLower(signature)))
 }
