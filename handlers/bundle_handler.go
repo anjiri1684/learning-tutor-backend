@@ -268,9 +268,15 @@ func PurchaseBundle(c *fiber.Ctx) error {
 	}
 
 	if req.PaymentProvider == "paystack" {
+		authURL, err := payments.InitializePaystackTransaction(studentBundle.Student.Email, payment.Amount, payment.Currency, payment.ID.String(), payments.PaystackCallbackURL(c.Get("Origin")))
+		if err != nil {
+			log.Printf("🔥 Paystack initialize failed for payment %s: %v", payment.ID, err)
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Could not start Paystack checkout, please try again."})
+		}
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-			"student_bundle": studentBundle,
-			"payment_id":     payment.ID,
+			"student_bundle":    studentBundle,
+			"payment_id":        payment.ID,
+			"authorization_url": authURL,
 		})
 	}
 

@@ -214,7 +214,16 @@ func CreateBooking(c *fiber.Ctx) error {
 	}
 
 	if req.PaymentProvider == "paystack" {
-		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"booking": booking, "payment_id": payment.ID})
+		authURL, err := payments.InitializePaystackTransaction(booking.Student.Email, payment.Amount, payment.Currency, payment.ID.String(), payments.PaystackCallbackURL(c.Get("Origin")))
+		if err != nil {
+			log.Printf("🔥 Paystack initialize failed for payment %s: %v", payment.ID, err)
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Could not start Paystack checkout, please try again."})
+		}
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"booking":           booking,
+			"payment_id":        payment.ID,
+			"authorization_url": authURL,
+		})
 	}
 
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid payment provider specified for external payment"})
