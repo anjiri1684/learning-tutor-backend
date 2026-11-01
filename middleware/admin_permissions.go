@@ -52,8 +52,6 @@ func CoachHasSection(perms *string, slug string) bool {
 	return false
 }
 
-// AdminAreaRequired allows full admins and coaches into the admin area.
-// Must run after Protected().
 func AdminAreaRequired() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		token := c.Locals("user").(*jwt.Token)
@@ -66,9 +64,6 @@ func AdminAreaRequired() fiber.Handler {
 	}
 }
 
-// AdminSection returns middleware that permits the request when the caller is a
-// full admin, or a coach who has been granted `slug`.
-// Must run after Protected() + AdminAreaRequired().
 func AdminSection(slug string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		token := c.Locals("user").(*jwt.Token)

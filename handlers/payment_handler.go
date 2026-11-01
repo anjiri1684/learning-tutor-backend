@@ -54,7 +54,9 @@ func HandlePaymentWebhook(c *fiber.Ctx) error {
 		stk.MerchantRequestID, paymentRefID, stk.ResultCode)
 
 	var payment models.Payment
-	if err := database.DB.Where("id = ?", paymentRefID).First(&payment).Error; err != nil {
+	// Only M-Pesa payments belong to this webhook; never let it touch Paystack
+	// records (e.g. flip an amount_mismatch payment to succeeded).
+	if err := database.DB.Where("id = ? AND provider = ?", paymentRefID, "mpesa").First(&payment).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Payment record not found"})
 	}
 
@@ -147,30 +149,64 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 	}
 
 	var payment models.Payment
-	if err := database.DB.Where("id = ? AND provider = ? AND status = ?", req.Reference, "paystack", "pending").First(&payment).Error; err != nil {
+	if err := database.DB.Where("id = ? AND provider = ?", req.Reference, "paystack").First(&payment).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Pending Paystack payment not found for this reference"})
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Paystack payment not found for this reference"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
+	}
+
+	purchaseType := "booking"
+	if payment.StudentBundleID != nil {
+		purchaseType = "bundle"
+	}
+
+	// The callback page can be refreshed or opened twice; treat an
+	// already-confirmed payment as success instead of a 404.
+	if payment.Status == "succeeded" {
+		return c.JSON(fiber.Map{"status": "success", "type": purchaseType, "message": "Payment already confirmed"})
+	}
+	if payment.Status != "pending" {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "This payment can no longer be confirmed (status: " + payment.Status + "). Please contact support."})
 	}
 
 	verified, err := payments.VerifyPaystackTransaction(req.Reference)
 	if err != nil {
 		log.Printf("🔥 Paystack verify API call failed: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to verify payment with Paystack"})
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to verify payment with Paystack"})
 	}
 
 	if verified.Data.Status != "success" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Payment not completed on Paystack"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Payment not completed on Paystack (status: " + verified.Data.Status + ")"})
+	}
+
+	// Amount check: what Paystack actually collected must match what we
+	// charged for, in the same currency. Paystack amounts are in subunits.
+	expected := payments.ToSubunit(payment.Amount)
+	if verified.Data.Amount != expected || !strings.EqualFold(verified.Data.Currency, payment.Currency) {
+		log.Printf("🚨 Paystack amount mismatch for payment %s: expected %d %s, got %d %s (txn %d)",
+			payment.ID, expected, payment.Currency, verified.Data.Amount, verified.Data.Currency, verified.Data.TransactionID)
+		if err := database.DB.Model(&models.Payment{}).Where("id = ? AND status = ?", payment.ID, "pending").Update("status", "amount_mismatch").Error; err != nil {
+			log.Printf("🔥 could not mark payment %s as amount_mismatch: %v", payment.ID, err)
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Paid amount does not match the order amount. Please contact support."})
 	}
 
 	txnID := fmt.Sprintf("%d", verified.Data.TransactionID)
+	alreadyDone := false
 
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		payment.Status = "succeeded"
-		payment.ProviderTxnID = &txnID
-		if err := tx.Save(&payment).Error; err != nil {
-			return err
+		// Conditional update so two concurrent verifies can't both confirm
+		// (and both send emails). Only the one that flips pending wins.
+		res := tx.Model(&models.Payment{}).
+			Where("id = ? AND status = ?", payment.ID, "pending").
+			Updates(map[string]interface{}{"status": "succeeded", "provider_txn_id": txnID})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			alreadyDone = true
+			return nil
 		}
 
 		if payment.BookingID != nil {
@@ -212,8 +248,13 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
+		log.Printf("🔥 CRITICAL: Paystack payment %s verified but finalizing failed: %v", payment.ID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize purchase"})
 	}
 
-	return c.JSON(fiber.Map{"status": "success", "message": "Payment verified and purchase confirmed"})
+	msg := "Payment verified and purchase confirmed"
+	if alreadyDone {
+		msg = "Payment already confirmed"
+	}
+	return c.JSON(fiber.Map{"status": "success", "type": purchaseType, "message": msg})
 }
