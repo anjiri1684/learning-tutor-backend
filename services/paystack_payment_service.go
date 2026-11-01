@@ -59,6 +59,7 @@ func PaystackAmountMatches(p *models.Payment, v *payments.PaystackVerifyResponse
 func alertAdmin(subject, body string) {
 	to := config.Config("ADMIN_EMAIL")
 	if to == "" {
+		log.Printf("⚠️ ADMIN_EMAIL not set; admin alert not sent: %s", subject)
 		return
 	}
 	go notifications.SendEmail("Admin", to, subject, "<p>"+html.EscapeString(body)+"</p>")

@@ -32,7 +32,9 @@ func ReconcileStalePaystackPayments() {
 	now := time.Now()
 	if err := database.DB.
 		Where("provider = ? AND status = ? AND created_at < ?", "paystack", "pending", now.Add(-paystackStaleAfter)).
-		Order("created_at ASC").
+		// Least recently checked first; each row is touched below, so rows Paystack
+		// keeps erroring on rotate to the back instead of blocking newer ones.
+		Order("updated_at ASC").
 		Limit(paystackBatchSize).
 		Find(&stale).Error; err != nil {
 		log.Printf("🔥 Paystack reconcile: query failed: %v", err)
@@ -41,6 +43,7 @@ func ReconcileStalePaystackPayments() {
 
 	for i := range stale {
 		p := &stale[i]
+		database.DB.Model(&models.Payment{}).Where("id = ?", p.ID).UpdateColumn("updated_at", now)
 		v, err := payments.VerifyPaystackTransaction(p.ID.String())
 		if err != nil {
 			// Paystack explicitly reports it has no such transaction: the
