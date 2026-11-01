@@ -214,7 +214,7 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 	case errors.Is(err, services.ErrPaystackPaidAfterRelease):
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Your payment was received after this order expired. Please contact support for a refund or rebooking."})
 	case errors.Is(err, services.ErrPaymentNotConfirmable):
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "This payment can no longer be confirmed (status: " + payment.Status + "). Please contact support."})
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "This payment can no longer be confirmed. Please contact support."})
 	case err != nil:
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize purchase"})
 	}
@@ -228,7 +228,7 @@ func VerifyPaystackPaymentHandler(c *fiber.Ctx) error {
 
 // PaystackWebhookHandler receives Paystack events so payments are confirmed
 // even when the customer never comes back to the callback page.
-// Configure in the Paystack dashboard: <WEBHOOK_BASE_URL>/api/v1/payments/paystack-webhook
+// Configure in the Paystack dashboard: <WEBHOOK_BASE_URL>/api/v1/payments/webhooks/paystack
 func PaystackWebhookHandler(c *fiber.Ctx) error {
 	body := c.Body()
 	if !payments.ValidPaystackSignature(body, c.Get("x-paystack-signature")) {

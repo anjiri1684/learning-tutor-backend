@@ -1,8 +1,8 @@
 package jobs
 
 import (
+	"errors"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/anjiri1684/language_tutor/database"
@@ -11,22 +11,29 @@ import (
 	"github.com/anjiri1684/language_tutor/services"
 )
 
-// paystackStaleAfter is how long a Paystack checkout may sit unpaid before
-// its seat is given back.
-const paystackStaleAfter = 60 * time.Minute
+const (
+	// paystackStaleAfter is how long a Paystack checkout may sit unpaid before
+	// its seat is given back.
+	paystackStaleAfter = 60 * time.Minute
+	// paystackMaxPending: after this, even a transaction Paystack still calls
+	// "ongoing"/"processing" is released. If it is somehow paid later,
+	// FinalizePaystackPayment flags it paid_unfulfilled and alerts the admin.
+	paystackMaxPending = 24 * time.Hour
+	paystackBatchSize  = 100
+)
 
 // ReconcileStalePaystackPayments is the safety net for Paystack payments that
 // stayed pending: the customer never returned to the callback page, the
 // webhook was missed, or releasing the seat after a failed initialize failed.
 // Each one is checked with Paystack first, so a paid order is confirmed, not
-// cancelled. Only clearly unpaid ones (abandoned/failed/never created) are
-// released.
+// cancelled. Only clearly unpaid ones are released.
 func ReconcileStalePaystackPayments() {
 	var stale []models.Payment
-	cutoff := time.Now().Add(-paystackStaleAfter)
+	now := time.Now()
 	if err := database.DB.
-		Where("provider = ? AND status = ? AND created_at < ?", "paystack", "pending", cutoff).
-		Limit(100).
+		Where("provider = ? AND status = ? AND created_at < ?", "paystack", "pending", now.Add(-paystackStaleAfter)).
+		Order("created_at ASC").
+		Limit(paystackBatchSize).
 		Find(&stale).Error; err != nil {
 		log.Printf("🔥 Paystack reconcile: query failed: %v", err)
 		return
@@ -36,8 +43,9 @@ func ReconcileStalePaystackPayments() {
 		p := &stale[i]
 		v, err := payments.VerifyPaystackTransaction(p.ID.String())
 		if err != nil {
-			// A reference Paystack has never seen means checkout never started.
-			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			// Paystack explicitly reports it has no such transaction: the
+			// checkout was never created. Any other error is retried next run.
+			if errors.Is(err, payments.ErrPaystackTxnNotFound) {
 				releaseStale(p, "no transaction on Paystack")
 				continue
 			}
@@ -55,7 +63,11 @@ func ReconcileStalePaystackPayments() {
 		case "abandoned", "failed", "reversed":
 			releaseStale(p, v.Data.Status)
 		default:
-			// "ongoing", "pending", "processing", "queued": still in flight.
+			// "ongoing", "pending", "processing", "queued": still in flight,
+			// unless it has been far too long.
+			if p.CreatedAt.Before(now.Add(-paystackMaxPending)) {
+				releaseStale(p, "still "+v.Data.Status+" after 24h")
+			}
 		}
 	}
 }

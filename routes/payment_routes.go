@@ -11,9 +11,10 @@ func PaymentRoutes(app *fiber.App) {
 
 	api.Post("/payments/webhook", middleware.KCBWebhookIPAllowlist(), handlers.HandlePaymentWebhook)
 
-	// Public, signature-checked. Kept outside /payments/paystack because that
-	// group's Protected() middleware applies to every path under its prefix.
-	api.Post("/payments/paystack-webhook", handlers.PaystackWebhookHandler)
+	// Public, signature-checked. Its path must not start with
+	// "/payments/paystack": Fiber applies group middleware by plain string
+	// prefix, so that group's Protected() would also cover it.
+	api.Post("/payments/webhooks/paystack", handlers.PaystackWebhookHandler)
 
 	paystack := api.Group("/payments/paystack", middleware.Protected())
 	paystack.Post("/verify", handlers.VerifyPaystackPaymentHandler)

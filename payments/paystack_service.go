@@ -6,6 +6,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -20,9 +21,14 @@ const paystackBaseURL = "https://api.paystack.co"
 
 var paystackClient = &http.Client{Timeout: 20 * time.Second}
 
+// ErrPaystackTxnNotFound is returned when Paystack explicitly reports it has no
+// transaction with the given reference (response code "transaction_not_found").
+var ErrPaystackTxnNotFound = errors.New("paystack: transaction not found")
+
 type PaystackVerifyResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
+	Code    string `json:"code"`
 	Data    struct {
 		Status          string `json:"status"`
 		Reference       string `json:"reference"`
@@ -144,6 +150,9 @@ func VerifyPaystackTransaction(reference string) (*PaystackVerifyResponse, error
 	}
 
 	if !result.Status {
+		if result.Code == "transaction_not_found" {
+			return nil, fmt.Errorf("%w: %s", ErrPaystackTxnNotFound, result.Message)
+		}
 		return nil, fmt.Errorf("paystack: %s", result.Message)
 	}
 

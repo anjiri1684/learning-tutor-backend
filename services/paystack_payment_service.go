@@ -3,9 +3,11 @@ package services
 import (
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"strings"
 
+	config "github.com/anjiri1684/language_tutor/configs"
 	"github.com/anjiri1684/language_tutor/database"
 	"github.com/anjiri1684/language_tutor/models"
 	"github.com/anjiri1684/language_tutor/notifications"
@@ -16,6 +18,7 @@ import (
 )
 
 // Payment statuses used by the Paystack flow, beyond pending/succeeded/failed.
+// Both need a human: refund, rebook, or collect the difference.
 const (
 	PaymentStatusAmountMismatch  = "amount_mismatch"
 	PaymentStatusPaidUnfulfilled = "paid_unfulfilled"
@@ -52,63 +55,86 @@ func PaystackAmountMatches(p *models.Payment, v *payments.PaystackVerifyResponse
 	return v.Data.RequestedAmount == expected && v.Data.Amount >= expected
 }
 
+// alertAdmin emails ADMIN_EMAIL about a payment that needs manual action.
+func alertAdmin(subject, body string) {
+	to := config.Config("ADMIN_EMAIL")
+	if to == "" {
+		return
+	}
+	go notifications.SendEmail("Admin", to, subject, "<p>"+html.EscapeString(body)+"</p>")
+}
+
 // FinalizePaystackPayment confirms a payment that Paystack reports as
-// successful. It is safe to call more than once and from several places
-// (callback verify, webhook, sweep job): only the call that flips the payment
-// from pending to succeeded does the work and sends emails.
+// successful. It is called from the callback verify, the webhook and the
+// reconcile job, possibly at the same moment. The payment row is locked and
+// every decision is made inside one transaction, so it serializes with
+// releasePurchaseTx: a payment is either confirmed or released, never both,
+// and a payment that lands after a release is always flagged.
 // Returns alreadyDone=true when another call had already confirmed it.
 func FinalizePaystackPayment(paymentID uuid.UUID, v *payments.PaystackVerifyResponse) (alreadyDone bool, err error) {
-	var payment models.Payment
-	if err := database.DB.First(&payment, "id = ? AND provider = ?", paymentID, "paystack").Error; err != nil {
-		return false, err
-	}
-
 	if v.Data.Status != "success" {
 		return false, ErrPaystackNotSuccessful
 	}
 
-	switch payment.Status {
-	case "succeeded":
-		return true, nil
-	case "pending":
-		// handled below
-	case "failed":
-		// We released this order (checkout failed to start, or the sweep job
-		// timed it out) but the customer paid anyway. Flag it for a refund.
-		database.DB.Model(&models.Payment{}).
-			Where("id = ? AND status = ?", payment.ID, "failed").
-			Updates(map[string]any{"status": PaymentStatusPaidUnfulfilled, "provider_txn_id": fmt.Sprintf("%d", v.Data.TransactionID)})
-		log.Printf("🚨 CRITICAL: Paystack payment %s was paid after the order was released (txn %d, %d %s). Refund or rebook manually.",
-			payment.ID, v.Data.TransactionID, v.Data.Amount, v.Data.Currency)
-		return false, ErrPaystackPaidAfterRelease
-	default:
-		return false, ErrPaymentNotConfirmable
-	}
-
-	if !PaystackAmountMatches(&payment, v) {
-		log.Printf("🚨 Paystack amount mismatch for payment %s: expected %d %s, got amount=%d requested=%d %s (txn %d)",
-			payment.ID, payments.ToSubunit(payment.Amount), payment.Currency, v.Data.Amount, v.Data.RequestedAmount, v.Data.Currency, v.Data.TransactionID)
-		if err := database.DB.Model(&models.Payment{}).Where("id = ? AND status = ?", payment.ID, "pending").Update("status", PaymentStatusAmountMismatch).Error; err != nil {
-			log.Printf("🔥 could not mark payment %s as amount_mismatch: %v", payment.ID, err)
-		}
-		return false, ErrPaystackAmountMismatch
-	}
-
 	txnID := fmt.Sprintf("%d", v.Data.TransactionID)
-	// Side effects (emails, referrals) run only after the transaction commits,
-	// so nobody gets a "confirmed" email for a purchase that rolled back.
+	var outcome error
+	// Side effects (emails, referrals, alerts) run only after the transaction
+	// commits, so nobody gets a "confirmed" email for a purchase that rolled back.
 	var afterCommit []func()
 
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&models.Payment{}).
-			Where("id = ? AND status = ?", payment.ID, "pending").
-			Updates(map[string]any{"status": "succeeded", "provider_txn_id": txnID})
-		if res.Error != nil {
-			return res.Error
+		var payment models.Payment
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&payment, "id = ? AND provider = ?", paymentID, "paystack").Error; err != nil {
+			return err
 		}
-		if res.RowsAffected == 0 {
+
+		switch payment.Status {
+		case "succeeded":
 			alreadyDone = true
 			return nil
+
+		case "failed":
+			// We released this order (checkout failed to start, or the
+			// reconcile job timed it out) but the customer paid anyway.
+			if err := tx.Model(&payment).Updates(map[string]any{
+				"status": PaymentStatusPaidUnfulfilled, "provider_txn_id": txnID,
+			}).Error; err != nil {
+				return err
+			}
+			msg := fmt.Sprintf("Paystack payment %s was paid after its order was released (txn %s, %d %s). Refund or rebook the student manually.",
+				payment.ID, txnID, v.Data.Amount, v.Data.Currency)
+			log.Printf("🚨 CRITICAL: %s", msg)
+			afterCommit = append(afterCommit, func() { alertAdmin("Paystack payment needs a refund or rebooking", msg) })
+			outcome = ErrPaystackPaidAfterRelease
+			return nil
+
+		case "pending":
+			// handled below
+
+		default:
+			outcome = ErrPaymentNotConfirmable
+			return nil
+		}
+
+		if !PaystackAmountMatches(&payment, v) {
+			// Hold the money for an admin to sort out, but give the seat back
+			// so the slot isn't blocked indefinitely.
+			if err := releasePurchaseTx(tx, &payment, PaymentStatusAmountMismatch); err != nil {
+				return err
+			}
+			msg := fmt.Sprintf("Paystack payment %s amount mismatch: expected %d %s, got amount=%d requested=%d %s (txn %s). The order was cancelled; refund or collect the difference.",
+				payment.ID, payments.ToSubunit(payment.Amount), payment.Currency, v.Data.Amount, v.Data.RequestedAmount, v.Data.Currency, txnID)
+			log.Printf("🚨 %s", msg)
+			afterCommit = append(afterCommit, func() { alertAdmin("Paystack payment amount mismatch", msg) })
+			outcome = ErrPaystackAmountMismatch
+			return nil
+		}
+
+		if err := tx.Model(&payment).Updates(map[string]any{
+			"status": "succeeded", "provider_txn_id": txnID,
+		}).Error; err != nil {
+			return err
 		}
 
 		if payment.BookingID != nil {
@@ -146,80 +172,81 @@ func FinalizePaystackPayment(paymentID uuid.UUID, v *payments.PaystackVerifyResp
 		return nil
 	})
 	if err != nil {
-		log.Printf("🔥 CRITICAL: Paystack payment %s verified but finalizing failed: %v", payment.ID, err)
+		log.Printf("🔥 CRITICAL: Paystack payment %s verified but finalizing failed: %v", paymentID, err)
 		return false, err
 	}
 
 	for _, fn := range afterCommit {
 		go fn()
 	}
-	return alreadyDone, nil
+	return alreadyDone, outcome
 }
 
-// ReleasePendingBooking undoes a booking whose external payment never
-// happened: payment -> failed, booking -> cancelled, and the slot seat is
-// freed. Guarded on the pending statuses so it never touches a paid booking.
-func ReleasePendingBooking(bookingID, paymentID uuid.UUID) error {
-	return database.DB.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&models.Payment{}).
-			Where("id = ? AND status = ?", paymentID, "pending").
-			Update("status", "failed")
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil
-		}
-
-		var booking models.Booking
-		if err := tx.First(&booking, "id = ?", bookingID).Error; err != nil {
-			return err
-		}
-		if booking.Status != "pending_payment" {
-			return nil
-		}
-		booking.Status = "cancelled"
-		if err := tx.Save(&booking).Error; err != nil {
-			return err
-		}
-
-		var slot models.AvailabilitySlot
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", booking.AvailabilitySlotID).Error; err != nil {
-			return err
-		}
-		if slot.CurrentStudents > 0 {
-			slot.CurrentStudents--
-		}
-		if slot.CurrentStudents < slot.MaxStudents {
-			slot.Status = "available"
-		}
-		return tx.Save(&slot).Error
-	})
-}
-
-// ReleasePendingBundle closes out a bundle purchase whose payment never
-// happened: payment -> failed, student bundle -> cancelled.
-func ReleasePendingBundle(studentBundleID, paymentID uuid.UUID) error {
-	return database.DB.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&models.Payment{}).
-			Where("id = ? AND status = ?", paymentID, "pending").
-			Update("status", "failed")
-		if res.Error != nil || res.RowsAffected == 0 {
-			return res.Error
-		}
-		return tx.Model(&models.StudentBundle{}).
-			Where("id = ? AND status = ?", studentBundleID, "pending_payment").
-			Update("status", "cancelled").Error
-	})
-}
-
-// ReleasePendingPayment releases whatever the payment was for.
-func ReleasePendingPayment(p *models.Payment) error {
-	switch {
-	case p.BookingID != nil:
-		return ReleasePendingBooking(*p.BookingID, p.ID)
-	case p.StudentBundleID != nil:
-		return ReleasePendingBundle(*p.StudentBundleID, p.ID)
+// releasePurchaseTx moves a pending payment to newStatus and undoes what it
+// was for: the booking is cancelled and its slot seat freed, or the student
+// bundle is cancelled. It locks the payment row and does nothing unless the
+// payment is still pending, so it never touches a paid order and serializes
+// with FinalizePaystackPayment.
+func releasePurchaseTx(tx *gorm.DB, p *models.Payment, newStatus string) error {
+	var current models.Payment
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", p.ID).Error; err != nil {
+		return err
 	}
-	return nil
+	if current.Status != "pending" {
+		return nil
+	}
+	if err := tx.Model(&current).Update("status", newStatus).Error; err != nil {
+		return err
+	}
+
+	if current.StudentBundleID != nil {
+		return tx.Model(&models.StudentBundle{}).
+			Where("id = ? AND status = ?", current.StudentBundleID, "pending_payment").
+			Update("status", "cancelled").Error
+	}
+	if current.BookingID == nil {
+		return nil
+	}
+
+	var booking models.Booking
+	if err := tx.First(&booking, "id = ?", current.BookingID).Error; err != nil {
+		return err
+	}
+	if booking.Status != "pending_payment" {
+		return nil
+	}
+	booking.Status = "cancelled"
+	if err := tx.Save(&booking).Error; err != nil {
+		return err
+	}
+
+	var slot models.AvailabilitySlot
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&slot, "id = ?", booking.AvailabilitySlotID).Error; err != nil {
+		return err
+	}
+	if slot.CurrentStudents > 0 {
+		slot.CurrentStudents--
+	}
+	if slot.CurrentStudents < slot.MaxStudents {
+		slot.Status = "available"
+	}
+	return tx.Save(&slot).Error
+}
+
+// ReleasePendingPayment releases an unpaid order: payment -> failed, and the
+// booking (seat freed) or student bundle is cancelled.
+func ReleasePendingPayment(p *models.Payment) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		return releasePurchaseTx(tx, p, "failed")
+	})
+}
+
+// ReleasePendingBooking releases an unpaid booking by its payment.
+func ReleasePendingBooking(bookingID, paymentID uuid.UUID) error {
+	return ReleasePendingPayment(&models.Payment{ID: paymentID, BookingID: &bookingID})
+}
+
+// ReleasePendingBundle releases an unpaid bundle purchase by its payment.
+func ReleasePendingBundle(studentBundleID, paymentID uuid.UUID) error {
+	return ReleasePendingPayment(&models.Payment{ID: paymentID, StudentBundleID: &studentBundleID})
 }
